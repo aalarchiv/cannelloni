@@ -18,12 +18,34 @@
  *
  */
 
+#include <mutex>
+
 #include "peerregistry.h"
 
 using namespace cannelloni;
 
 void PeerRegistry::add(const Peer &peer) {
+  std::unique_lock<std::shared_mutex> lock(m_mutex);
+  addLocked(peer);
+}
+
+bool PeerRegistry::remove(PeerId id) {
+  std::unique_lock<std::shared_mutex> lock(m_mutex);
+  return removeLocked(id);
+}
+
+void PeerRegistry::addLocked(const Peer &peer) {
   m_peers.push_back(peer);
+}
+
+bool PeerRegistry::removeLocked(PeerId id) {
+  for (auto it = m_peers.begin(); it != m_peers.end(); ++it) {
+    if (it->id == id) {
+      m_peers.erase(it);
+      return true;
+    }
+  }
+  return false;
 }
 
 const std::vector<Peer> &PeerRegistry::peers() const {

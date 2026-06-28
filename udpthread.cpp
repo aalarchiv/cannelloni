@@ -22,8 +22,11 @@
 #include <netinet/in.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #include <algorithm>
+#include <mutex>
+#include <shared_mutex>
 #include <vector>
 
 #include <fcntl.h>
@@ -44,7 +47,15 @@
 #include "logging.h"
 #include "make_unique.h"
 #include "parser.h"
+#include "peerregistry.h"
 #include "router.h"
+
+/* Monotonic clock for peer-liveness bookkeeping (immune to wall-clock steps). */
+static uint64_t nowMonoNs() {
+  struct timespec ts;
+  clock_gettime(CLOCK_MONOTONIC, &ts);
+  return static_cast<uint64_t>(ts.tv_sec) * 1000000000ull + static_cast<uint64_t>(ts.tv_nsec);
+}
 
 UDPThread::UDPThread(const struct debugOptions_t &debugOptions,
                      const struct UDPThreadParams &params)
@@ -197,6 +208,8 @@ void UDPThread::run() {
     }
     if (FD_ISSET(m_blockTimer.getFd(), &readfds)) {
       m_blockTimer.read();
+      /* Periodic liveness sweep; no-op unless discovery + a timeout are set. */
+      sweepDeadPeers();
     }
     if (FD_ISSET(m_socket, &readfds)) {
       /* Clear buffer */
@@ -212,7 +225,8 @@ void UDPThread::run() {
       }
     }
   }
-  uint64_t totalTx = 0, totalRx = 0;
+  /* Seed with the aggregate so already-evicted dynamic peers are still counted. */
+  uint64_t totalTx = m_txCount, totalRx = m_rxCount;
   for (auto &peer : m_peers) {
     if (m_debugOptions.buffer)
       peer->egress->debug();
@@ -228,6 +242,16 @@ void UDPThread::addPeer(PeerId id, const struct sockaddr_storage &remoteAddr, Fr
   auto peer = std::make_unique<UdpPeer>(id, remoteAddr, egress);
   m_peerIndex[id] = peer.get();
   m_peers.push_back(std::move(peer));
+  /* Hand out dynamic ids past every statically-configured one. */
+  if (id >= m_nextPeerId)
+    m_nextPeerId = id + 1;
+}
+
+void UDPThread::enableDiscovery(PeerRegistry *registry, size_t maxPeers, uint32_t peerTimeoutSec) {
+  m_registry = registry;
+  m_discover = true;
+  m_maxPeers = maxPeers;
+  m_peerTimeoutNs = static_cast<uint64_t>(peerTimeoutSec) * 1000000000ull;
 }
 
 /* Compare two socket addresses by family, IP and port. */
@@ -248,6 +272,20 @@ static bool sameSockaddr(const struct sockaddr_storage &a, const struct sockaddr
   return false;
 }
 
+/*
+ * Cheap check that a datagram looks like a cannelloni DATA packet (correct
+ * version + opcode, big enough for the header). Discovery only learns a new
+ * peer from such a packet ("valid RX"), so a stray non-cannelloni datagram
+ * (port scan, wrong protocol) never spends a peer slot or an egress buffer.
+ */
+static bool isCannelloniData(const uint8_t *buffer, uint16_t len) {
+  if (len < CANNELLONI_DATA_PACKET_BASE_SIZE)
+    return false;
+  const struct CannelloniDataPacket *data =
+      reinterpret_cast<const struct CannelloniDataPacket *>(buffer);
+  return data->version == CANNELLONI_FRAME_VERSION && data->op_code == DATA;
+}
+
 UdpPeer *UDPThread::resolveOrigin(const struct sockaddr_storage *clientAddr) {
   for (auto &peer : m_peers) {
     if (sameSockaddr(peer->remoteAddr, *clientAddr))
@@ -256,21 +294,109 @@ UdpPeer *UDPThread::resolveOrigin(const struct sockaddr_storage *clientAddr) {
   /*
    * Backward compatibility: a single UDP peer with peer-checking disabled (-p)
    * accepts datagrams from any source (e.g. NAT / unknown source port), exactly
-   * as before. With several peers an unknown source cannot be attributed to a
-   * participant (no origin => no correct origin-exclusion) and is dropped.
+   * as before. Discovery (which attributes distinct sources to distinct peers)
+   * supersedes this, so it does not apply when discovery is on. With several
+   * peers an unknown source cannot be attributed to a participant (no origin =>
+   * no correct origin-exclusion) and is dropped.
    */
-  if (!m_checkPeer && m_peers.size() == 1)
+  if (!m_discover && !m_checkPeer && m_peers.size() == 1)
     return m_peers.front().get();
   return nullptr;
 }
 
+UdpPeer *UDPThread::learnPeer(const struct sockaddr_storage *clientAddr) {
+  if (m_maxPeers != 0 && m_dynamicCount >= m_maxPeers) {
+    lwarn << "Discovery: dynamic peer limit (" << m_maxPeers << ") reached, dropping datagram from "
+          << formatSocketAddress(getSocketAddress(clientAddr)) << std::endl;
+    return nullptr;
+  }
+
+  PeerId id = m_nextPeerId++;
+  /*
+   * A discovered peer owns its egress buffer (static peers' buffers live in
+   * main). The UdpPeer is stored behind a unique_ptr, so the raw pointer we
+   * hand to the registry stays valid across vector reallocation.
+   */
+  auto egress = std::make_unique<FrameBuffer>(1000, 16000);
+  auto peer = std::make_unique<UdpPeer>(id, *clientAddr, egress.get());
+  peer->egressOwned = std::move(egress);
+  peer->dynamic = true;
+  peer->lastSeenNs = nowMonoNs();
+  /* Arm the per-peer flush cadence exactly as run() does for static peers. */
+  peer->transmitTimer.adjust(m_timeout, m_timeout);
+
+  UdpPeer *raw = peer.get();
+  FrameBuffer *eg = raw->egress;
+  /*
+   * Publish atomically with respect to the routing threads. The CAN thread
+   * reaches a peer's egress/timer through m_peers/m_peerIndex (in transmitFrame)
+   * while iterating the registry, all under one shared lock; an unordered_map
+   * rehash or vector reallocation racing that lookup would be undefined. So the
+   * registry entry AND the index/vector are mutated together under the registry
+   * write lock: a route() either sees the peer in all three, or in none.
+   */
+  {
+    std::unique_lock<std::shared_mutex> lock(m_registry->mutex());
+    m_peerIndex[id] = raw;
+    m_peers.push_back(std::move(peer));
+    m_registry->addLocked(Peer{ id, this, eg });
+  }
+  m_dynamicCount++;
+  linfo << "Discovered UDP peer " << formatSocketAddress(getSocketAddress(clientAddr))
+        << " as participant " << id << " (" << m_dynamicCount << " dynamic)" << std::endl;
+  return raw;
+}
+
+void UDPThread::sweepDeadPeers() {
+  if (!m_discover || m_peerTimeoutNs == 0)
+    return;
+  uint64_t now = nowMonoNs();
+  for (auto it = m_peers.begin(); it != m_peers.end(); ) {
+    UdpPeer *peer = it->get();
+    /* Only discovered peers age out; static peers are operator intent and are
+     * left in place so traffic resumes when they recover (84a.3 decision). */
+    if (peer->dynamic && now - peer->lastSeenNs > m_peerTimeoutNs) {
+      linfo << "Evicting silent UDP peer " << formatSocketAddress(getSocketAddress(&peer->remoteAddr))
+            << " (participant " << peer->id << ")" << std::endl;
+      /* Fold the evicted peer's traffic into the aggregate (unused on the hub
+       * path) so the shutdown summary still accounts for it. */
+      m_txCount += peer->txCount;
+      m_rxCount += peer->rxCount;
+      /*
+       * Unpublish and free under the registry write lock. Acquiring it waits for
+       * every in-flight route() to finish, so no router can be holding this
+       * peer's egress when erase() destroys the UdpPeer (closing its timerfd and
+       * freeing the egress buffer). The same lock excludes the routing threads'
+       * m_peers/m_peerIndex reads in transmitFrame.
+       */
+      std::unique_lock<std::shared_mutex> lock(m_registry->mutex());
+      m_registry->removeLocked(peer->id);
+      m_peerIndex.erase(peer->id);
+      it = m_peers.erase(it);
+      m_dynamicCount--;
+    } else {
+      ++it;
+    }
+  }
+}
+
 void UDPThread::handleDatagram(uint8_t *buffer, uint16_t len, struct sockaddr_storage *clientAddr) {
   UdpPeer *peer = resolveOrigin(clientAddr);
+  /*
+   * Discovery (Phase 3): an unknown source carrying a well-formed cannelloni
+   * packet is learnt as a new dynamic peer, so real devices dial into the hub
+   * without static config. Learning only on valid RX keeps a stray datagram
+   * from spending a peer slot; the cap bounds it further.
+   */
+  if (peer == nullptr && m_discover && isCannelloniData(buffer, len))
+    peer = learnPeer(clientAddr);
   if (peer == nullptr) {
     lwarn << "Got a datagram from " << formatSocketAddress(getSocketAddress(clientAddr))
           << ", which is not a configured peer. Restart with -p argument to override." << std::endl;
     return;
   }
+  /* Liveness: a valid datagram keeps a discovered peer alive past the sweep. */
+  peer->lastSeenNs = nowMonoNs();
   if (m_debugOptions.udp) {
     linfo << "Received " << std::dec << len << " Bytes from Host "
           << formatSocketAddress(getSocketAddress(clientAddr)) << std::endl;

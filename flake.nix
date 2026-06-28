@@ -53,6 +53,7 @@
         tcp = nixpkgsFor.${system}.callPackage ./nix/tests/tcp.nix { };
         udp = nixpkgsFor.${system}.callPackage ./nix/tests/udp.nix { };
         multipeer = nixpkgsFor.${system}.callPackage ./nix/tests/multipeer.nix { };
+        discovery = nixpkgsFor.${system}.callPackage ./nix/tests/discovery.nix { };
         characterization = nixpkgsFor.${system}.callPackage ./nix/tests/characterization.nix { };
         characterization_sort = nixpkgsFor.${system}.callPackage ./nix/tests/characterization_sort.nix { };
       });

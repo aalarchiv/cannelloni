@@ -38,6 +38,15 @@ class Timer {
     Timer();
     ~Timer();
 
+    /*
+     * A Timer owns a timerfd, so it must not be copied (a shallow copy would
+     * double-close the fd). Dynamic UDP peers create and destroy Timers at
+     * runtime (peer discovery / liveness eviction), which is what makes the
+     * non-copyability and the closing destructor load-bearing.
+     */
+    Timer(const Timer &) = delete;
+    Timer &operator=(const Timer &) = delete;
+
     uint64_t getValue();
 
     /* adjusts the interval and value of the Timer */

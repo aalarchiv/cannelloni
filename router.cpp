@@ -19,6 +19,7 @@
  */
 
 #include <cstring>
+#include <shared_mutex>
 #include <linux/can.h>
 
 #include "router.h"
@@ -35,6 +36,14 @@ Router::Router(PeerRegistry &registry, bool debugBuffer)
 }
 
 void Router::route(const canfd_frame *frame, PeerId origin) {
+  /*
+   * Hold a shared lock for the whole fan-out. This keeps the Peer records and
+   * the egress buffers they point at alive while we copy into and enqueue onto
+   * them, even though the net thread may be discovering or evicting peers
+   * concurrently (Phase 3). Eviction takes the exclusive lock and so cannot
+   * free an egress buffer out from under an in-flight route().
+   */
+  std::shared_lock<std::shared_mutex> lock(m_registry.mutex());
   for (const Peer &peer : m_registry.peers()) {
     /* Origin-exclusion: never reflect a frame back to its source. */
     if (peer.id == origin)

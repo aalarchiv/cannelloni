@@ -207,6 +207,34 @@ Each peer points back at the hub as an ordinary single-peer instance
 address and port; datagrams from an unknown source are dropped (a single-peer
 instance started with `-p` still accepts any source, as before).
 
+#### Dynamic peer discovery
+
+Instead of (or in addition to) a static `--peer` list, the hub can **learn**
+peers at runtime so devices dial in without being configured ahead of time.
+Enable it with `--discover`:
+
+```
+# discovery hub: no static peers, learn everyone who shows up
+cannelloni -I vcan0 -l 20000 --discover
+```
+
+With `--discover` a datagram from an unknown source that is a valid cannelloni
+packet adds that source as a new peer; from then on it is a full participant on
+the virtual bus. Two knobs bound it:
+
+- `--max-peers N` (default 16): the most peers that may be discovered. Once the
+  cap is reached, datagrams from further new sources are dropped.
+- `--peer-timeout SEC` (default 30, `0` disables): a *discovered* peer that
+  sends nothing for this long is evicted and its buffer freed. Liveness is
+  refreshed by any valid datagram from the peer.
+
+Only discovered peers are evicted — **statically configured `--peer`/`-R` peers
+are never aged out**, so a static peer that is briefly down resumes
+automatically when it returns (its frames meanwhile hit the drop-oldest egress
+ring rather than growing without bound). Discovery is **unauthenticated** and
+must be confined to a trusted network (see the trust model); the cap is
+misconfiguration hygiene, not a security control.
+
 Notes and limits:
 
 - A single `-R`/`-r` invocation is unchanged and byte-for-byte identical to

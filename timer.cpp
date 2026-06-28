@@ -35,7 +35,8 @@ Timer::Timer() {
 }
 
 Timer::~Timer() {
-
+  if (m_timerfd >= 0)
+    close(m_timerfd);
 }
 
 uint64_t Timer::getValue() {

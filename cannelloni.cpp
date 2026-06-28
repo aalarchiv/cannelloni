@@ -85,6 +85,9 @@ void printUsage() {
   std::cout << "\t -R ADDRESS \t\t remote ADDRESS (mandatory for UDP unless --peer is used), default: 127.0.0.1" << std::endl;
   std::cout << "\t --peer HOST[:PORT] \t add a UDP hub peer (repeatable); PORT defaults to -r" << std::endl;
   std::cout << "\t --peers-file FILE \t read UDP hub peers from FILE (one HOST[:PORT] per line)" << std::endl;
+  std::cout << "\t --discover \t\t learn UDP peers at runtime from valid traffic (hub, off by default)" << std::endl;
+  std::cout << "\t --max-peers N \t\t cap on dynamically discovered peers, default: 16" << std::endl;
+  std::cout << "\t --peer-timeout SEC \t evict a discovered peer after SEC seconds of silence (0=never), default: 30" << std::endl;
   std::cout << "\t -I INTERFACE \t\t can interface, default: vcan0" << std::endl;
   std::cout << "\t -t timeout \t\t buffer timeout for can messages (us), default: 100000" << std::endl;
   std::cout << "\t -T table.csv \t\t path to csv with individual timeouts" << std::endl;
@@ -170,6 +173,9 @@ void daemonize(std::string pidFilePath) {
 enum {
   OPT_PEER = 1000,
   OPT_PEERS_FILE,
+  OPT_DISCOVER,
+  OPT_MAX_PEERS,
+  OPT_PEER_TIMEOUT,
 };
 
 /*
@@ -249,6 +255,10 @@ int main(int argc, char **argv) {
   /* Static UDP hub peer list (--peer host:port, repeatable; --peers-file) */
   std::vector<std::string> peerSpecs;
   std::string peersFile;
+  /* Dynamic UDP peer discovery (Phase 3, --discover). */
+  bool discover = false;
+  size_t maxPeers = 16;
+  uint32_t peerTimeoutSec = 30;
 
   struct debugOptions_t debugOptions = { /* can */ 0, /* udp */ 0, /* buffer */ 0, /* timer */ 0 };
 
@@ -260,8 +270,11 @@ int main(int argc, char **argv) {
 #endif
 
   static struct option long_options[] = {
-    {"peer",       required_argument, 0, OPT_PEER},
-    {"peers-file", required_argument, 0, OPT_PEERS_FILE},
+    {"peer",         required_argument, 0, OPT_PEER},
+    {"peers-file",   required_argument, 0, OPT_PEERS_FILE},
+    {"discover",     no_argument,       0, OPT_DISCOVER},
+    {"max-peers",    required_argument, 0, OPT_MAX_PEERS},
+    {"peer-timeout", required_argument, 0, OPT_PEER_TIMEOUT},
     {0, 0, 0, 0}
   };
 
@@ -272,6 +285,15 @@ int main(int argc, char **argv) {
         break;
       case OPT_PEERS_FILE:
         peersFile = std::string(optarg);
+        break;
+      case OPT_DISCOVER:
+        discover = true;
+        break;
+      case OPT_MAX_PEERS:
+        maxPeers = static_cast<size_t>(strtoul(optarg, NULL, 10));
+        break;
+      case OPT_PEER_TIMEOUT:
+        peerTimeoutSec = static_cast<uint32_t>(strtoul(optarg, NULL, 10));
         break;
       case 'C':
         switch (optarg[0]) {
@@ -421,18 +443,20 @@ int main(int argc, char **argv) {
     }
   }
 
-  /* Multiple peers (the hub) are UDP-only in this phase (Phase 2). */
-  if (!peerSpecs.empty() && (useTCP || useSCTP)) {
+  /* The hub (static peers or dynamic discovery) is UDP-only in this phase. */
+  if ((!peerSpecs.empty() || discover) && (useTCP || useSCTP)) {
     std::cout << "Usage Error: " << std::endl
-              << "--peer/--peers-file is only supported for UDP" << std::endl
+              << "--peer/--peers-file/--discover is only supported for UDP" << std::endl
               << std::endl;
     printUsage();
     return -1;
   }
 
-  if (!remoteIPSupplied && peerSpecs.empty() && !useSCTP && !useTCP) {
+  /* A discovery hub may start with no peers at all and learn them at runtime,
+   * so -R/--peer is not required when --discover is set. */
+  if (!remoteIPSupplied && peerSpecs.empty() && !discover && !useSCTP && !useTCP) {
     std::cout << "Usage Error: " << std::endl
-              << "Remote IP not supplied (use -R or --peer for UDP)" << std::endl
+              << "Remote IP not supplied (use -R, --peer or --discover for UDP)" << std::endl
               << std::endl;
     printUsage();
     return -1;
@@ -614,8 +638,12 @@ int main(int argc, char **argv) {
     udpThread.get()->setTimeout(bufferTimeout);
     udpThread.get()->setTimeoutTable(timeoutTable);
 
-    /* Resolve the peer address list: explicit --peer/--peers-file specs, else
-     * the legacy single -R/-r remote (which keeps 1-peer behaviour identical). */
+    /*
+     * Resolve the static peer address list: explicit --peer/--peers-file specs,
+     * else the legacy single -R/-r remote (which keeps 1-peer behaviour
+     * identical). With --discover and no static peers the hub starts empty and
+     * learns every peer at runtime, so the list is left empty here.
+     */
     std::vector<struct sockaddr_storage> udpPeerAddrs;
     if (!peerSpecs.empty()) {
       for (const std::string &spec : peerSpecs) {
@@ -626,7 +654,7 @@ int main(int argc, char **argv) {
         }
         udpPeerAddrs.push_back(addr);
       }
-    } else {
+    } else if (remoteIPSupplied || !discover) {
       udpPeerAddrs.push_back(remoteAddr);
     }
 
@@ -638,11 +666,23 @@ int main(int argc, char **argv) {
       netFrameBuffers.push_back(std::move(egress));
       ++nextId;
     }
+
+    /*
+     * Dynamic discovery: the thread learns/evicts peers at runtime, mutating
+     * the same registry the Router reads (serialised by the registry mutex).
+     */
+    if (discover)
+      udpThread->enableDiscovery(&registry, maxPeers, peerTimeoutSec);
+
     netThread = std::move(udpThread);
   }
 
-  /* TCP/SCTP serve a single peer in this phase: one egress buffer. */
-  if (netFrameBuffers.empty()) {
+  /*
+   * TCP/SCTP serve a single peer in this phase: one egress buffer. (A UDP
+   * discovery hub legitimately starts with no peers, so this fallback is gated
+   * on the single-peer transports, not merely on an empty buffer list.)
+   */
+  if (netFrameBuffers.empty() && (useTCP || useSCTP)) {
     auto egress = std::make_unique<FrameBuffer>(1000,16000);
     netThread->setFrameBuffer(egress.get());
     registry.add(Peer{ FIRST_NET_PEER_ID, netThread.get(), egress.get() });

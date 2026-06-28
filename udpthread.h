@@ -37,6 +37,8 @@
 
 namespace cannelloni {
 
+class PeerRegistry;
+
 #define IPv4_HEADER_SIZE 20
 #define IPv6_HEADER_SIZE 40
 #define UDP_HEADER_SIZE 8
@@ -71,11 +73,22 @@ struct UdpPeer {
 
   PeerId id;
   struct sockaddr_storage remoteAddr;
-  FrameBuffer *egress;     /* not owned; lives in main, shared with the registry */
+  FrameBuffer *egress;     /* the active pointer (== egressOwned.get() for dynamic peers) */
   uint8_t seqNo;
   Timer transmitTimer;
   uint64_t txCount;
   uint64_t rxCount;
+
+  /*
+   * Dynamically-discovered peers (Phase 3) own their egress buffer here (static
+   * peers leave this null; their buffer lives in main). `dynamic` marks a peer
+   * as one learnt at runtime, the only kind the liveness sweep is allowed to
+   * evict. `lastSeenNs` (CLOCK_MONOTONIC) is bumped on every valid RX from the
+   * peer and drives that sweep.
+   */
+  std::unique_ptr<FrameBuffer> egressOwned;
+  bool dynamic = false;
+  uint64_t lastSeenNs = 0;
 };
 
 class UDPThread : public ConnectionThread {
@@ -96,6 +109,17 @@ class UDPThread : public ConnectionThread {
      */
     void addPeer(PeerId id, const struct sockaddr_storage &remoteAddr, FrameBuffer *egress);
 
+    /*
+     * Enable dynamic UDP peer discovery (Phase 3, cannelloni-84a.3). When on, a
+     * valid datagram from an unknown source is learnt as a new peer (up to
+     * maxPeers of them), and a learnt peer that has been silent for longer than
+     * peerTimeoutSec is evicted by the liveness sweep (0 = never evict). The
+     * registry is mutated from the net thread, so it must be the same instance
+     * the Router reads (its shared_mutex serialises the two). Call before
+     * start().
+     */
+    void enableDiscovery(PeerRegistry *registry, size_t maxPeers, uint32_t peerTimeoutSec);
+
     void setTimeout(uint32_t timeout);
     uint32_t getTimeout();
 
@@ -110,8 +134,16 @@ class UDPThread : public ConnectionThread {
     void flushPeer(UdpPeer &peer);
     /* Enqueue + (re)arm a flush timer, honouring the per-CAN-id timeout table. */
     void armTransmit(FrameBuffer &buffer, Timer &timer, const canfd_frame *frame);
-    /* Map an incoming datagram's source address to a configured peer. */
+    /* Map an incoming datagram's source address to an already-known peer (or
+     * nullptr). Discovery of new sources is decided in handleDatagram, which has
+     * the datagram needed to gate learning on valid RX. */
     UdpPeer *resolveOrigin(const struct sockaddr_storage *clientAddr);
+    /* Learn a previously-unseen source as a new dynamic peer (discovery). Net
+     * thread only. Returns nullptr if the dynamic-peer cap is reached. */
+    UdpPeer *learnPeer(const struct sockaddr_storage *clientAddr);
+    /* Evict dynamic peers silent for longer than the configured timeout. Net
+     * thread only; runs off the periodic block timer. */
+    void sweepDeadPeers();
     /* Parse a received datagram and route each frame with the resolved origin. */
     void handleDatagram(uint8_t *buffer, uint16_t len, struct sockaddr_storage *clientAddr);
 
@@ -146,6 +178,18 @@ class UDPThread : public ConnectionThread {
      */
     std::vector<std::unique_ptr<UdpPeer>> m_peers;
     std::unordered_map<PeerId, UdpPeer*> m_peerIndex;
+
+    /*
+     * Dynamic discovery state (Phase 3). m_registry is non-null only while
+     * discovery is enabled; it is the registry the Router reads, mutated under
+     * its shared_mutex. m_nextPeerId hands out ids past the static ones.
+     */
+    PeerRegistry *m_registry = nullptr;
+    bool m_discover = false;
+    size_t m_maxPeers = 0;
+    uint64_t m_peerTimeoutNs = 0;
+    PeerId m_nextPeerId = FIRST_NET_PEER_ID;
+    size_t m_dynamicCount = 0;
 };
 
 }
