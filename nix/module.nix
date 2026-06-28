@@ -50,6 +50,12 @@ in
       default = "server";
       description = "which mode to run in (server or client)";
     };
+    extraArgs = mkOption {
+      type = types.listOf types.str;
+      default = [ ];
+      example = [ "-s" "-t" "1000000" ];
+      description = "extra command line arguments appended verbatim to cannelloni (e.g. -s to sort frames)";
+    };
   };
 
   config = lib.mkIf cfg.enable {
@@ -58,13 +64,14 @@ in
       mode = if cfg.mode == "server" then "s" else "c";
       transportAndMode = if cfg.transport != "udp" then (if cfg.transport == "tcp" then "-C ${mode}" else "-S ${mode}") else "";
       remoteAddress = if cfg.remoteAddress != null then "-R ${cfg.remoteAddress}" else "-p";
+      extraArgs = lib.concatStringsSep " " cfg.extraArgs;
     in {
       description = "cannelloni";
       after = [ "network.target" ];
       wantedBy = [ "multi-user.target" ];
 
       serviceConfig = {
-        ExecStart = "${pkgs.cannelloni}/bin/cannelloni ${transportAndMode} -I ${cfg.canInterface} -l ${builtins.toString cfg.localPort} -L ${cfg.localAddress} -r ${builtins.toString cfg.remotePort} ${remoteAddress}";
+        ExecStart = "${pkgs.cannelloni}/bin/cannelloni ${transportAndMode} -I ${cfg.canInterface} -l ${builtins.toString cfg.localPort} -L ${cfg.localAddress} -r ${builtins.toString cfg.remotePort} ${remoteAddress} ${extraArgs}";
         User="cannelloni";
         DynamicUser=true;
        };

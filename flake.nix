@@ -52,6 +52,8 @@
         sctp = nixpkgsFor.${system}.callPackage ./nix/tests/sctp.nix { };
         tcp = nixpkgsFor.${system}.callPackage ./nix/tests/tcp.nix { };
         udp = nixpkgsFor.${system}.callPackage ./nix/tests/udp.nix { };
+        characterization = nixpkgsFor.${system}.callPackage ./nix/tests/characterization.nix { };
+        characterization_sort = nixpkgsFor.${system}.callPackage ./nix/tests/characterization_sort.nix { };
       });
 
       githubActions = nix-github-actions.lib.mkGithubMatrix {
