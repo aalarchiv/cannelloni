@@ -1,0 +1,7 @@
+{
+  "database": "dolt",
+  "backend": "dolt",
+  "dolt_mode": "embedded",
+  "dolt_database": "cannelloni",
+  "project_id": "6ae87620-c4e5-4823-b620-e090ae882b06"
+}
