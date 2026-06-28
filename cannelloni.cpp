@@ -53,6 +53,9 @@
 #include "framebuffer.h"
 #include "logging.h"
 #include "make_unique.h"
+#include "peer.h"
+#include "peerregistry.h"
+#include "router.h"
 #include <memory>
 
 #define MIN_LINK_MTU_SIZE 100
@@ -487,10 +490,23 @@ int main(int argc, char **argv) {
   auto canThread = std::make_unique<CANThread>(debugOptions, canInterfaceName);
   auto netFrameBuffer = std::make_unique<FrameBuffer>(1000,16000);
   auto canFrameBuffer = std::make_unique<FrameBuffer>(1000,16000);
-  netThread->setPeerThread(canThread.get());
   netThread->setFrameBuffer(netFrameBuffer.get());
-  canThread->setPeerThread(netThread.get());
   canThread->setFrameBuffer(canFrameBuffer.get());
+
+  /*
+   * Build the hub. The local CAN bus and the (single, in this phase) network
+   * peer are equal participants; the Router fans a frame out to every
+   * participant except its origin. With one CAN participant and one net peer
+   * this is the same CAN<->peer data path as before. The registry and router
+   * outlive the threads (joined below before main returns).
+   */
+  PeerRegistry registry;
+  registry.add(Peer{ CAN_PEER_ID, canThread.get(), canFrameBuffer.get() });
+  registry.add(Peer{ FIRST_NET_PEER_ID, netThread.get(), netFrameBuffer.get() });
+  Router router(registry, debugOptions.buffer);
+  canThread->setRouter(&router, CAN_PEER_ID);
+  netThread->setRouter(&router, FIRST_NET_PEER_ID);
+
   int netStartReturn = netThread->start();
   int canStartReturn = canThread->start();
 

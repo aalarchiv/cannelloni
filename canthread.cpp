@@ -35,6 +35,7 @@
 #include "canthread.h"
 #include "cannelloni.h"
 #include "logging.h"
+#include "router.h"
 
 using namespace cannelloni;
 
@@ -128,19 +129,15 @@ void CANThread::run() {
       }
     }
     if (FD_ISSET(m_canSocket, &readfds)) {
-      /* Request frame from frameBuffer */
-      struct canfd_frame *frame = m_peerThread->getFrameBuffer()->requestFrame(true, m_debugOptions.buffer);
-      if (frame == NULL) {
-        continue;
-      }
-      receivedBytes = recv(m_canSocket, frame, sizeof(struct canfd_frame), 0);
+      /* Read into an ingress-local frame; the Router copies it into each
+       * target's egress pool (the frame is never shared between buffers). */
+      struct canfd_frame frame;
+      receivedBytes = recv(m_canSocket, &frame, sizeof(struct canfd_frame), 0);
       if (receivedBytes < 0) {
         if (errno == EWOULDBLOCK || errno == EAGAIN) {
           /* Timeout occurred */
-          m_peerThread->getFrameBuffer()->insertFramePool(frame);
           continue;
         } else {
-          m_peerThread->getFrameBuffer()->insertFramePool(frame);
           lerror << "CAN read error" << std::endl;
           break;
         }
@@ -148,15 +145,13 @@ void CANThread::run() {
         m_rxCount++;
         /* If it is a CAN FD frame, encode this in len */
         if (receivedBytes == CANFD_MTU) {
-          frame->len |= CANFD_FRAME;
+          frame.len |= CANFD_FRAME;
         } else {
-          frame->len &= ~(CANFD_FRAME);
+          frame.len &= ~(CANFD_FRAME);
         }
-        if (m_peerThread != NULL) {
-          m_peerThread->transmitFrame(frame);
-        }
+        m_router->route(&frame, m_selfId);
         if (m_debugOptions.can) {
-          printCANInfo(frame);
+          printCANInfo(&frame);
         }
       } else {
         lwarn << "Incomplete/Invalid CAN frame" << std::endl;

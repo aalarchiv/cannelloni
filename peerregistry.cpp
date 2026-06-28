@@ -1,7 +1,7 @@
 /*
  * This file is part of cannelloni, a SocketCAN over Ethernet tunnel.
  *
- * Copyright (C) 2014-2017 Maximilian Güntner <code@sourcediver.org>
+ * Copyright (C) 2014-2023 Maximilian Güntner <code@mguentner.de>
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License, version 2 as
@@ -18,30 +18,26 @@
  *
  */
 
-#include "connection.h"
+#include "peerregistry.h"
 
 using namespace cannelloni;
 
-ConnectionThread::ConnectionThread()
-  : Thread()
-  , m_frameBuffer(0)
-  , m_router(nullptr)
-  , m_selfId(0)
-{
-
+void PeerRegistry::add(const Peer &peer) {
+  m_peers.push_back(peer);
 }
 
-ConnectionThread::~ConnectionThread() {}
-
-void ConnectionThread::setFrameBuffer(FrameBuffer *buffer) {
-  m_frameBuffer = buffer;
+const std::vector<Peer> &PeerRegistry::peers() const {
+  return m_peers;
 }
 
-FrameBuffer* ConnectionThread::getFrameBuffer() {
-  return m_frameBuffer;
+Peer *PeerRegistry::find(PeerId id) {
+  for (Peer &peer : m_peers) {
+    if (peer.id == id)
+      return &peer;
+  }
+  return nullptr;
 }
 
-void ConnectionThread::setRouter(Router *router, PeerId selfId) {
-  m_router = router;
-  m_selfId = selfId;
+size_t PeerRegistry::size() const {
+  return m_peers.size();
 }

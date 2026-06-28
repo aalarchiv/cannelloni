@@ -1,7 +1,7 @@
 /*
  * This file is part of cannelloni, a SocketCAN over Ethernet tunnel.
  *
- * Copyright (C) 2014-2017 Maximilian Güntner <code@sourcediver.org>
+ * Copyright (C) 2014-2023 Maximilian Güntner <code@mguentner.de>
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License, version 2 as
@@ -18,30 +18,33 @@
  *
  */
 
-#include "connection.h"
+#pragma once
 
-using namespace cannelloni;
+#include <cstddef>
+#include <vector>
 
-ConnectionThread::ConnectionThread()
-  : Thread()
-  , m_frameBuffer(0)
-  , m_router(nullptr)
-  , m_selfId(0)
-{
+#include "peer.h"
 
-}
+namespace cannelloni {
 
-ConnectionThread::~ConnectionThread() {}
+/*
+ * Holds the set of participants on the virtual shared CAN bus.
+ *
+ * Phase 1: the registry is populated once at startup, before any thread starts
+ * routing, and is read-only thereafter. Dynamic add/remove (Phase 3 peer
+ * discovery / Phase 5 stale-peer drop) will require synchronisation against the
+ * routing threads.
+ */
+class PeerRegistry {
+  public:
+    void add(const Peer &peer);
 
-void ConnectionThread::setFrameBuffer(FrameBuffer *buffer) {
-  m_frameBuffer = buffer;
-}
+    const std::vector<Peer> &peers() const;
+    Peer *find(PeerId id);
+    size_t size() const;
 
-FrameBuffer* ConnectionThread::getFrameBuffer() {
-  return m_frameBuffer;
-}
+  private:
+    std::vector<Peer> m_peers;
+};
 
-void ConnectionThread::setRouter(Router *router, PeerId selfId) {
-  m_router = router;
-  m_selfId = selfId;
 }

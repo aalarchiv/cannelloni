@@ -25,8 +25,11 @@
 
 #include "thread.h"
 #include "framebuffer.h"
+#include "peer.h"
 
 namespace cannelloni {
+
+class Router;
 
 struct debugOptions_t {
   uint8_t can    : 1;
@@ -40,16 +43,19 @@ class ConnectionThread : public Thread {
     ConnectionThread();
     virtual ~ConnectionThread();
 
+    /* Accept an egress frame for this participant (enqueue + trigger flush). */
     virtual void transmitFrame(canfd_frame *frame) = 0;
     void setFrameBuffer(FrameBuffer *buffer);
     FrameBuffer *getFrameBuffer();
 
-    void setPeerThread(ConnectionThread *thread);
-    ConnectionThread* getPeerThread();
+    /* Wire this participant to the hub. selfId is passed as the origin when
+     * this thread routes ingested frames, so the Router excludes it. */
+    void setRouter(Router *router, PeerId selfId);
 
   protected:
     FrameBuffer *m_frameBuffer;
-    ConnectionThread *m_peerThread;
+    Router *m_router;
+    PeerId m_selfId;
 };
 
 }

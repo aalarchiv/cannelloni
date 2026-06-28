@@ -52,6 +52,7 @@
 #include "connection.h"
 #include "logging.h"
 #include "parser.h"
+#include "router.h"
 #include "tcpthread.h"
 
 TCPThread::TCPThread(const struct debugOptions_t &debugOptions,
@@ -173,13 +174,9 @@ void TCPThread::run() {
         } else {
           m_decoder.expectedBytes = decodeFrame(buffer, receivedBytes, &m_decoder.tempFrame, &m_decoder.state);
           if (m_decoder.expectedBytes == 0) {
-            canfd_frame *frameBufferFrame = m_peerThread->getFrameBuffer()->requestFrame(true, m_debugOptions.buffer);
-            if (frameBufferFrame != NULL) {
-              memcpy(frameBufferFrame, &m_decoder.tempFrame, sizeof(m_decoder.tempFrame));
-              m_peerThread->transmitFrame(frameBufferFrame);
-            } else {
-              lerror << "Dropping frame due to framebuffer issue." << std::endl;
-            }
+            /* The Router copies the decoded frame into each target's egress
+             * pool, so the decoder's tempFrame can be reused immediately. */
+            m_router->route(&m_decoder.tempFrame, m_selfId);
             m_rxCount++;
             continue;
           } else if (m_decoder.expectedBytes == -1) {

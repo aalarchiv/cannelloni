@@ -49,7 +49,9 @@ add_library(addsources STATIC
             tcpthread.cpp
             tcp_client_thread.cpp
             tcp_server_thread.cpp
-            canthread.cpp)
+            canthread.cpp
+            router.cpp
+            peerregistry.cpp)
 
 add_library(cannelloni-common SHARED
             parser.cpp

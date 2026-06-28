@@ -44,6 +44,7 @@
 #include "logging.h"
 #include "make_unique.h"
 #include "parser.h"
+#include "router.h"
 
 UDPThread::UDPThread(const struct debugOptions_t &debugOptions,
                      const struct UDPThreadParams &params)
@@ -111,19 +112,26 @@ bool UDPThread::parsePacket(uint8_t *buffer, uint16_t len, struct sockaddr_stora
   if (m_debugOptions.udp) {
     linfo << "Received " << std::dec << len << " Bytes from Host " << formatSocketAddress(getSocketAddress(clientAddr)) << std::endl;
   }
-  auto allocator = [this]()
+  /*
+   * Parse each frame into an ingress-local scratch slot, then route it. The
+   * parser fills and hands off one frame at a time (the receiver runs before
+   * the next allocator call), so a single reused scratch frame is safe and
+   * keeps ingest off the target's pool. The Router copies it into each
+   * target's egress pool.
+   */
+  canfd_frame scratch;
+  auto allocator = [&scratch]()
   {
-      return m_peerThread->getFrameBuffer()->requestFrame(true, m_debugOptions.buffer);
+      return &scratch;
   };
   auto receiver = [this](canfd_frame* f, bool success)
   {
       if (!success)
       {
-          m_peerThread->getFrameBuffer()->insertFramePool(f);
           return;
       }
 
-      m_peerThread->transmitFrame(f);
+      m_router->route(f, m_selfId);
       if (m_debugOptions.can)
       {
           printCANInfo(f);
