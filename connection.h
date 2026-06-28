@@ -43,8 +43,14 @@ class ConnectionThread : public Thread {
     ConnectionThread();
     virtual ~ConnectionThread();
 
-    /* Accept an egress frame for this participant (enqueue + trigger flush). */
-    virtual void transmitFrame(canfd_frame *frame) = 0;
+    /*
+     * Accept an egress frame for a specific participant (enqueue + trigger
+     * flush). `target` selects the destination participant. Transports that
+     * serve a single peer (CAN, TCP, SCTP, single-peer UDP) ignore it; the
+     * multiplexed UDP hub uses it to pick the per-peer egress buffer, sequence
+     * number and flush timer.
+     */
+    virtual void transmitFrame(canfd_frame *frame, PeerId target) = 0;
     void setFrameBuffer(FrameBuffer *buffer);
     FrameBuffer *getFrameBuffer();
 

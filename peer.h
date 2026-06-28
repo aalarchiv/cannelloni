@@ -40,12 +40,15 @@ static const PeerId FIRST_NET_PEER_ID = 1;
 
 /*
  * A participant on the virtual shared CAN bus (the local CAN bus or one network
- * peer). Each participant owns an egress FrameBuffer holding the frames waiting
- * to be written to it; the ConnectionThread performs the actual egress I/O.
+ * peer). This is the transport-neutral routing record the Router needs: the id
+ * (for origin-exclusion), the egress FrameBuffer holding frames waiting to be
+ * written to the participant, and the ConnectionThread that performs the egress
+ * I/O. Several peers may share one thread (the Phase 2 multiplexed UDP hub).
  *
- * Phase 1 keeps per-peer protocol state (UDP seq_no, TCP Decoder) inside the
- * ConnectionThread since a single net thread serves exactly one peer; it moves
- * into Peer in Phase 2 once one thread multiplexes several peers.
+ * Per-peer transport state (UDP seq_no / remote address / flush timer, TCP
+ * Decoder) lives in a per-peer structure owned by that thread and keyed by
+ * PeerId (see UDPThread::UdpPeer), not here, so this record stays a plain value
+ * and the timerfd-backed Timer is never copied.
  */
 struct Peer {
   PeerId id;

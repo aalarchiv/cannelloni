@@ -20,6 +20,16 @@ in
       default = null;
       description = "IP Address of the remote cannelloni instance. Optional for UDP";
     };
+    peers = mkOption {
+      type = types.listOf types.str;
+      default = [ ];
+      example = [ "node_b" "node_c:20000" ];
+      description = ''
+        UDP hub peers as HOST[:PORT] (PORT defaults to remotePort). When
+        non-empty, cannelloni runs as a multi-peer hub: each entry is emitted as
+        a repeatable --peer argument and -R/-p is omitted.
+      '';
+    };
     remotePort = mkOption {
       type = types.int;
       default = 10000;
@@ -63,7 +73,13 @@ in
     let
       mode = if cfg.mode == "server" then "s" else "c";
       transportAndMode = if cfg.transport != "udp" then (if cfg.transport == "tcp" then "-C ${mode}" else "-S ${mode}") else "";
-      remoteAddress = if cfg.remoteAddress != null then "-R ${cfg.remoteAddress}" else "-p";
+      # A non-empty peer list makes this a UDP hub: emit repeatable --peer and
+      # drop -R/-p (peers carry their own addresses; sources are matched by them).
+      peerArgs = lib.concatStringsSep " " (map (p: "--peer ${p}") cfg.peers);
+      remoteAddress =
+        if cfg.peers != [ ] then ""
+        else if cfg.remoteAddress != null then "-R ${cfg.remoteAddress}"
+        else "-p";
       extraArgs = lib.concatStringsSep " " cfg.extraArgs;
     in {
       description = "cannelloni";
@@ -71,7 +87,7 @@ in
       wantedBy = [ "multi-user.target" ];
 
       serviceConfig = {
-        ExecStart = "${pkgs.cannelloni}/bin/cannelloni ${transportAndMode} -I ${cfg.canInterface} -l ${builtins.toString cfg.localPort} -L ${cfg.localAddress} -r ${builtins.toString cfg.remotePort} ${remoteAddress} ${extraArgs}";
+        ExecStart = "${pkgs.cannelloni}/bin/cannelloni ${transportAndMode} -I ${cfg.canInterface} -l ${builtins.toString cfg.localPort} -L ${cfg.localAddress} -r ${builtins.toString cfg.remotePort} ${remoteAddress} ${peerArgs} ${extraArgs}";
         User="cannelloni";
         DynamicUser=true;
        };

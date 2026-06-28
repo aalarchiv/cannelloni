@@ -59,7 +59,7 @@ namespace cannelloni {
       virtual void cleanup() = 0;
       virtual void run();
 
-      virtual void transmitFrame(canfd_frame *frame);
+      virtual void transmitFrame(canfd_frame *frame, PeerId target);
 
     protected:
       bool isConnected();

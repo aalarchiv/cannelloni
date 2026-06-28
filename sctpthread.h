@@ -63,7 +63,7 @@ class SCTPThread : public UDPThread {
     virtual int start();
     virtual void run();
 
-    virtual void transmitFrame(canfd_frame *frame);
+    virtual void transmitFrame(canfd_frame *frame, PeerId target);
 
   protected:
     virtual ssize_t sendBuffer(uint8_t *buffer, uint16_t len);

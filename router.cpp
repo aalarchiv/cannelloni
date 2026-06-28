@@ -53,6 +53,6 @@ void Router::route(const canfd_frame *frame, PeerId origin) {
      * flush; it also enforces target-specific gating (TCP must be NEGOTIATED,
      * SCTP must be connected) exactly as the previous direct delivery did.
      */
-    peer.thread->transmitFrame(copy);
+    peer.thread->transmitFrame(copy, peer.id);
   }
 }

@@ -204,7 +204,8 @@ void TCPThread::disconnect() {
   close(m_framebufferHasDataPipe[SIGNAL_PIPE_WRITE]);
 }
 
-void TCPThread::transmitFrame(canfd_frame *frame) {
+void TCPThread::transmitFrame(canfd_frame *frame, PeerId /*target*/) {
+  /* TCP serves a single peer in this phase; the target id is ignored. */
   if (m_connect_state != NEGOTIATED) {
     m_frameBuffer->insertFramePool(frame);
     return;

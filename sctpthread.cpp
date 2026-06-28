@@ -242,9 +242,9 @@ void SCTPThread::run() {
   }
 }
 
-void SCTPThread::transmitFrame(canfd_frame *frame) {
+void SCTPThread::transmitFrame(canfd_frame *frame, PeerId target) {
   if (m_connected) {
-    UDPThread::transmitFrame(frame);
+    UDPThread::transmitFrame(frame, target);
   } else {
     /* We need to drop that frame, since we are not connected */
     m_frameBuffer->insertFramePool(frame);

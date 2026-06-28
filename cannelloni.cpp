@@ -21,13 +21,16 @@
 #include <cstdlib>
 #include <fcntl.h>
 #include <fstream>
+#include <getopt.h>
 #include <iostream>
 #include <signal.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include <string>
 #include <sys/socket.h>
 #include <unistd.h>
+#include <vector>
 
 #include <iomanip>
 
@@ -79,7 +82,9 @@ void printUsage() {
   std::cout << "\t -l PORT \t\t listening port, default: 20000" << std::endl;
   std::cout << "\t -L ADDRESS \t\t listening ADDRESS, default: 0.0.0.0" << std::endl;
   std::cout << "\t -r PORT \t\t remote port, default: 20000" << std::endl;
-  std::cout << "\t -R ADDRESS \t\t remote ADDRESS (mandatory for UDP), default: 127.0.0.1" << std::endl;
+  std::cout << "\t -R ADDRESS \t\t remote ADDRESS (mandatory for UDP unless --peer is used), default: 127.0.0.1" << std::endl;
+  std::cout << "\t --peer HOST[:PORT] \t add a UDP hub peer (repeatable); PORT defaults to -r" << std::endl;
+  std::cout << "\t --peers-file FILE \t read UDP hub peers from FILE (one HOST[:PORT] per line)" << std::endl;
   std::cout << "\t -I INTERFACE \t\t can interface, default: vcan0" << std::endl;
   std::cout << "\t -t timeout \t\t buffer timeout for can messages (us), default: 100000" << std::endl;
   std::cout << "\t -T table.csv \t\t path to csv with individual timeouts" << std::endl;
@@ -161,6 +166,61 @@ void daemonize(std::string pidFilePath) {
   }
 }
 
+/* Long-only options (no short equivalent) for the multi-peer hub. */
+enum {
+  OPT_PEER = 1000,
+  OPT_PEERS_FILE,
+};
+
+/*
+ * Parse a "host:port" peer specification into a sockaddr_storage. IPv6
+ * literals with a port must be bracketed ("[::1]:20000"); a bare address uses
+ * defaultPort. host may be an IP literal or a DNS name (resolved by
+ * parseAddress). Returns false on a malformed spec or resolution failure.
+ */
+static bool parsePeerSpec(const std::string &spec, int addressFamily,
+                          uint16_t defaultPort, struct sockaddr_storage *out) {
+  std::string host;
+  std::string portStr;
+
+  if (!spec.empty() && spec.front() == '[') {
+    /* Bracketed IPv6 literal: [addr] or [addr]:port */
+    std::string::size_type close = spec.find(']');
+    if (close == std::string::npos)
+      return false;
+    host = spec.substr(1, close - 1);
+    if (close + 1 < spec.size() && spec[close + 1] == ':')
+      portStr = spec.substr(close + 2);
+  } else {
+    std::string::size_type colon = spec.rfind(':');
+    /* Only treat as host:port when there is exactly one colon (IPv4 / name);
+     * an unbracketed IPv6 literal has several colons and uses defaultPort. */
+    if (colon != std::string::npos && spec.find(':') == colon) {
+      host = spec.substr(0, colon);
+      portStr = spec.substr(colon + 1);
+    } else {
+      host = spec;
+    }
+  }
+
+  if (host.empty())
+    return false;
+
+  uint16_t port = defaultPort;
+  if (!portStr.empty())
+    port = static_cast<uint16_t>(strtoul(portStr.c_str(), NULL, 10));
+
+  memset(out, 0, sizeof(*out));
+  if (!parseAddress(host.c_str(), (struct sockaddr *) out, addressFamily))
+    return false;
+
+  if (addressFamily == AF_INET)
+    ((struct sockaddr_in *) out)->sin_port = htons(port);
+  else
+    ((struct sockaddr_in6 *) out)->sin6_port = htons(port);
+  return true;
+}
+
 int main(int argc, char **argv) {
   int opt;
   bool remoteIPSupplied = false;
@@ -186,6 +246,9 @@ int main(int argc, char **argv) {
   std::string pidFilePath = "/var/run/cannelloni.pid";
   /* Key is CAN ID, Value is timeout in us */
   std::map<uint32_t, uint32_t> timeoutTable;
+  /* Static UDP hub peer list (--peer host:port, repeatable; --peers-file) */
+  std::vector<std::string> peerSpecs;
+  std::string peersFile;
 
   struct debugOptions_t debugOptions = { /* can */ 0, /* udp */ 0, /* buffer */ 0, /* timer */ 0 };
 
@@ -196,8 +259,20 @@ int main(int argc, char **argv) {
   ;
 #endif
 
-  while ((opt = getopt(argc, argv, argument_options.c_str())) != -1) {
+  static struct option long_options[] = {
+    {"peer",       required_argument, 0, OPT_PEER},
+    {"peers-file", required_argument, 0, OPT_PEERS_FILE},
+    {0, 0, 0, 0}
+  };
+
+  while ((opt = getopt_long(argc, argv, argument_options.c_str(), long_options, NULL)) != -1) {
     switch(opt) {
+      case OPT_PEER:
+        peerSpecs.push_back(optarg);
+        break;
+      case OPT_PEERS_FILE:
+        peersFile = std::string(optarg);
+        break;
       case 'C':
         switch (optarg[0]) {
           case 's':
@@ -324,9 +399,40 @@ int main(int argc, char **argv) {
     printUsage();
     return -1;
   }
-  if (!remoteIPSupplied && !useSCTP && !useTCP) {
+
+  /* Pull additional peer specs from a peers file (one host:port per line;
+   * blank lines and lines starting with '#' are ignored). */
+  if (!peersFile.empty()) {
+    std::ifstream peersStream(peersFile);
+    if (!peersStream.is_open()) {
+      lerror << "Unable to open peers file " << peersFile << "." << std::endl;
+      return -1;
+    }
+    std::string line;
+    while (std::getline(peersStream, line)) {
+      std::string::size_type start = line.find_first_not_of(" \t\r\n");
+      if (start == std::string::npos)
+        continue;
+      std::string::size_type end = line.find_last_not_of(" \t\r\n");
+      std::string trimmed = line.substr(start, end - start + 1);
+      if (trimmed.empty() || trimmed[0] == '#')
+        continue;
+      peerSpecs.push_back(trimmed);
+    }
+  }
+
+  /* Multiple peers (the hub) are UDP-only in this phase (Phase 2). */
+  if (!peerSpecs.empty() && (useTCP || useSCTP)) {
     std::cout << "Usage Error: " << std::endl
-              << "Remote IP not supplied" << std::endl
+              << "--peer/--peers-file is only supported for UDP" << std::endl
+              << std::endl;
+    printUsage();
+    return -1;
+  }
+
+  if (!remoteIPSupplied && peerSpecs.empty() && !useSCTP && !useTCP) {
+    std::cout << "Usage Error: " << std::endl
+              << "Remote IP not supplied (use -R or --peer for UDP)" << std::endl
               << std::endl;
     printUsage();
     return -1;
@@ -443,6 +549,23 @@ int main(int argc, char **argv) {
     daemonize(pidFilePath);
   }
 
+  /*
+   * Build the hub. The local CAN bus is participant 0; each network peer gets
+   * an id >= 1. Every participant owns an egress FrameBuffer and the Router
+   * fans a frame out to every participant except its origin (origin-exclusion).
+   * The registry, router and per-peer buffers outlive the threads, which are
+   * joined below before main returns.
+   */
+  auto canThread = std::make_unique<CANThread>(debugOptions, canInterfaceName);
+  auto canFrameBuffer = std::make_unique<FrameBuffer>(1000,16000);
+  canThread->setFrameBuffer(canFrameBuffer.get());
+
+  PeerRegistry registry;
+  registry.add(Peer{ CAN_PEER_ID, canThread.get(), canFrameBuffer.get() });
+
+  /* Per-network-peer egress buffers, owned here (outlive the threads). */
+  std::vector<std::unique_ptr<FrameBuffer>> netFrameBuffers;
+
   std::unique_ptr<ConnectionThread> netThread;
   if (useTCP && tcpRole == TCP_SERVER) {
     netThread = std::make_unique<TCPServerThread>(debugOptions, TCPServerThreadParams {
@@ -461,7 +584,7 @@ int main(int argc, char **argv) {
 #ifdef SCTP_SUPPORT
     auto sctpThread = std::make_unique<SCTPThread>(debugOptions, SCTPThreadParams {
       .remoteAddr = remoteAddr,
-      .localAddr = localAddr,      
+      .localAddr = localAddr,
       .addressFamily = addressFamily,
       .sortFrames = sortUDP,
       .checkPeer = checkPeer,
@@ -473,36 +596,59 @@ int main(int argc, char **argv) {
     netThread = std::move(sctpThread);
 #endif
   } else {
-    
+    /*
+     * UDP hub: one multiplexed thread serving one or more peers over a single
+     * bound socket. Each peer gets its own egress buffer (per-peer seq_no +
+     * stream), registered with both the thread (for sendto/flush scheduling)
+     * and the registry (for routing).
+     */
     auto udpThread = std::make_unique<UDPThread>(debugOptions, UDPThreadParams{
       .remoteAddr = remoteAddr,
-      .localAddr = localAddr,      
+      .localAddr = localAddr,
       .addressFamily = addressFamily,
       .sortFrames = sortUDP,
       .checkPeer = checkPeer,
       .linkMtuSize = linkMtuSize,
     });
-    
+
     udpThread.get()->setTimeout(bufferTimeout);
     udpThread.get()->setTimeoutTable(timeoutTable);
+
+    /* Resolve the peer address list: explicit --peer/--peers-file specs, else
+     * the legacy single -R/-r remote (which keeps 1-peer behaviour identical). */
+    std::vector<struct sockaddr_storage> udpPeerAddrs;
+    if (!peerSpecs.empty()) {
+      for (const std::string &spec : peerSpecs) {
+        struct sockaddr_storage addr;
+        if (!parsePeerSpec(spec, addressFamily, remotePort, &addr)) {
+          lerror << "Invalid peer specification: " << spec << std::endl;
+          return -1;
+        }
+        udpPeerAddrs.push_back(addr);
+      }
+    } else {
+      udpPeerAddrs.push_back(remoteAddr);
+    }
+
+    PeerId nextId = FIRST_NET_PEER_ID;
+    for (const struct sockaddr_storage &addr : udpPeerAddrs) {
+      auto egress = std::make_unique<FrameBuffer>(1000,16000);
+      udpThread->addPeer(nextId, addr, egress.get());
+      registry.add(Peer{ nextId, udpThread.get(), egress.get() });
+      netFrameBuffers.push_back(std::move(egress));
+      ++nextId;
+    }
     netThread = std::move(udpThread);
   }
-  auto canThread = std::make_unique<CANThread>(debugOptions, canInterfaceName);
-  auto netFrameBuffer = std::make_unique<FrameBuffer>(1000,16000);
-  auto canFrameBuffer = std::make_unique<FrameBuffer>(1000,16000);
-  netThread->setFrameBuffer(netFrameBuffer.get());
-  canThread->setFrameBuffer(canFrameBuffer.get());
 
-  /*
-   * Build the hub. The local CAN bus and the (single, in this phase) network
-   * peer are equal participants; the Router fans a frame out to every
-   * participant except its origin. With one CAN participant and one net peer
-   * this is the same CAN<->peer data path as before. The registry and router
-   * outlive the threads (joined below before main returns).
-   */
-  PeerRegistry registry;
-  registry.add(Peer{ CAN_PEER_ID, canThread.get(), canFrameBuffer.get() });
-  registry.add(Peer{ FIRST_NET_PEER_ID, netThread.get(), netFrameBuffer.get() });
+  /* TCP/SCTP serve a single peer in this phase: one egress buffer. */
+  if (netFrameBuffers.empty()) {
+    auto egress = std::make_unique<FrameBuffer>(1000,16000);
+    netThread->setFrameBuffer(egress.get());
+    registry.add(Peer{ FIRST_NET_PEER_ID, netThread.get(), egress.get() });
+    netFrameBuffers.push_back(std::move(egress));
+  }
+
   Router router(registry, debugOptions.buffer);
   canThread->setRouter(&router, CAN_PEER_ID);
   netThread->setRouter(&router, FIRST_NET_PEER_ID);
@@ -547,7 +693,8 @@ int main(int argc, char **argv) {
   canThread->join();
 
   /* Clear/free pools once all threads are joined */
-  netFrameBuffer->clearPool();
+  for (auto &buffer : netFrameBuffers)
+    buffer->clearPool();
   canFrameBuffer->clearPool();
 
   close(signalFD);

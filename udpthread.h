@@ -21,12 +21,17 @@
 #pragma once
 
 #include <map>
+#include <memory>
+#include <unordered_map>
+#include <vector>
 
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <netinet/in.h>
 
 #include "connection.h"
+#include "framebuffer.h"
+#include "peer.h"
 #include "timer.h"
 
 
@@ -48,6 +53,31 @@ struct UDPThreadParams {
   uint16_t linkMtuSize;
 };
 
+/*
+ * Per-peer egress state for the multiplexed UDP hub. A single UDPThread owns
+ * one bound socket and N of these, one per network peer. Each holds the peer's
+ * own egress buffer, sequence number and flush timer so every peer sees an
+ * independent, standard cannelloni stream (Phase 2, cannelloni-84a.2). The
+ * Timer wraps a timerfd and must not be copied, hence UdpPeer is stored behind
+ * a unique_ptr and is non-copyable.
+ */
+struct UdpPeer {
+  UdpPeer(PeerId id, const struct sockaddr_storage &remoteAddr, FrameBuffer *egress)
+    : id(id), remoteAddr(remoteAddr), egress(egress)
+    , seqNo(0), transmitTimer(), txCount(0), rxCount(0)
+  {}
+  UdpPeer(const UdpPeer &) = delete;
+  UdpPeer &operator=(const UdpPeer &) = delete;
+
+  PeerId id;
+  struct sockaddr_storage remoteAddr;
+  FrameBuffer *egress;     /* not owned; lives in main, shared with the registry */
+  uint8_t seqNo;
+  Timer transmitTimer;
+  uint64_t txCount;
+  uint64_t rxCount;
+};
+
 class UDPThread : public ConnectionThread {
   public:
     UDPThread(const struct debugOptions_t &debugOptions,
@@ -57,7 +87,14 @@ class UDPThread : public ConnectionThread {
     virtual void stop();
     virtual void run();
     bool parsePacket(uint8_t *buf, uint16_t len, struct sockaddr_storage *clientAddr);
-    virtual void transmitFrame(canfd_frame *frame);
+    virtual void transmitFrame(canfd_frame *frame, PeerId target);
+
+    /*
+     * Register a network peer served by this (multiplexed) thread. Called once
+     * per peer at startup, before start(); the egress buffer is the same one
+     * registered with the PeerRegistry/Router for this peer.
+     */
+    void addPeer(PeerId id, const struct sockaddr_storage &remoteAddr, FrameBuffer *egress);
 
     void setTimeout(uint32_t timeout);
     uint32_t getTimeout();
@@ -68,6 +105,15 @@ class UDPThread : public ConnectionThread {
   protected:
     void prepareBuffer();
     virtual ssize_t sendBuffer(uint8_t *buffer, uint16_t len);
+
+    /* Flush one peer's egress buffer as a single UDP datagram to its address. */
+    void flushPeer(UdpPeer &peer);
+    /* Enqueue + (re)arm a flush timer, honouring the per-CAN-id timeout table. */
+    void armTransmit(FrameBuffer &buffer, Timer &timer, const canfd_frame *frame);
+    /* Map an incoming datagram's source address to a configured peer. */
+    UdpPeer *resolveOrigin(const struct sockaddr_storage *clientAddr);
+    /* Parse a received datagram and route each frame with the resolved origin. */
+    void handleDatagram(uint8_t *buffer, uint16_t len, struct sockaddr_storage *clientAddr);
 
   protected:
     struct debugOptions_t m_debugOptions;
@@ -91,6 +137,15 @@ class UDPThread : public ConnectionThread {
 
     uint32_t m_linkMtuSize; // mtu of the network interface
     uint32_t m_payloadSize; // payload usable by cannelloni
+
+    /*
+     * The network peers served by this thread. Empty for the single-peer
+     * base-class path reused by SCTPThread (which keeps using m_frameBuffer /
+     * m_sequenceNumber / m_transmitTimer / prepareBuffer() / parsePacket()).
+     * The UDP hub always populates this (>= 1 entry) and uses it exclusively.
+     */
+    std::vector<std::unique_ptr<UdpPeer>> m_peers;
+    std::unordered_map<PeerId, UdpPeer*> m_peerIndex;
 };
 
 }

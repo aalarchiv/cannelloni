@@ -39,7 +39,7 @@ class CANThread : public ConnectionThread {
     virtual void stop();
     virtual void run();
 
-    virtual void transmitFrame(canfd_frame *frame);
+    virtual void transmitFrame(canfd_frame *frame, PeerId target);
 
   private:
     void transmitBuffer();

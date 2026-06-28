@@ -166,7 +166,8 @@ void CANThread::run() {
   close(m_canSocket);
 }
 
-void CANThread::transmitFrame(canfd_frame* frame) {
+void CANThread::transmitFrame(canfd_frame* frame, PeerId /*target*/) {
+  /* There is exactly one CAN participant, so the target id is irrelevant. */
   m_frameBuffer->insertFrame(frame);
   fireTimer();
 }

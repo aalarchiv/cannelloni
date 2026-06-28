@@ -184,6 +184,44 @@ cannelloni -I vcan0 -R 192.168.0.2 -r 13000 -l 12000
 Set the *MTU* using `-m` depending on your connection. Default is
 1500 bytes.
 
+### UDP multi-peer hub
+
+A single UDP instance can bridge a CAN bus to **several** UDP peers at once,
+turning cannelloni into a hub: the local CAN bus and every peer form one
+virtual shared CAN bus where each participant sees every other participant's
+frames — like real devices on the same wire. A frame ingested from one
+participant is delivered to every participant *except* its origin
+(origin-exclusion), which gives bus behaviour plus one-hop loop avoidance.
+
+List the peers with the repeatable `--peer HOST[:PORT]` option (the port
+defaults to `-r`), or put one `HOST[:PORT]` per line in a file passed to
+`--peers-file` (blank lines and `#` comments are ignored):
+
+```
+# hub: bridge vcan0 to three peers
+cannelloni -I vcan0 -l 20000 --peer 192.168.0.3 --peer 192.168.0.4 --peer 192.168.0.5
+```
+
+Each peer points back at the hub as an ordinary single-peer instance
+(`-R <hub> -r 20000`). Incoming datagrams are matched to a peer by source
+address and port; datagrams from an unknown source are dropped (a single-peer
+instance started with `-p` still accepts any source, as before).
+
+Notes and limits:
+
+- A single `-R`/`-r` invocation is unchanged and byte-for-byte identical to
+  before — `--peer` is purely additive.
+- The hub preserves **per-link** order, not a single global bus order; use `-s`
+  to sort each flushed batch by CAN id.
+- The aggregate CAN bitrate is the hard ceiling for peers→CAN traffic; under
+  sustained overload frames are dropped oldest-first at egress (the path
+  recovers once the backlog drains) and no peer can stall the others.
+- Hub-to-hub topologies (a peer that is itself a hub) can form multi-hop loops
+  and are out of scope; keep the topology a star of single-peer leaves around
+  one hub.
+- The port must be kept on a trusted network: there is no peer authentication
+  (see the trust model), so any reachable host can inject CAN frames.
+
 ## SCTP
 
 With SCTP it is possible to use cannelloni over lossy connections
