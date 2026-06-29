@@ -24,6 +24,30 @@ Features:
 cannelloni is **not suited** for production deployments. Use it only in environments where packet loss is tolerable.
 There is **no guarantee** that CAN frames will reach their destination at all **and/or** in the right order.
 
+# Trust model
+
+cannelloni is designed for **internal, trusted networks**. Its threat model
+deliberately **excludes external attackers**: there is **no authentication and
+no encryption** between peers, consistent with upstream cannelloni. Any host
+that can reach the transport port can both read every CAN frame on the bus and
+inject frames of its own.
+
+This is a deliberate scoping decision, not an oversight, so it is the
+operator's responsibility to keep the transport secure:
+
+- Bind cannelloni to a trusted interface and keep the transport port off any
+  untrusted network — firewall it, put it on a VPN/overlay, or use a physically
+  isolated segment.
+- Treat the multi-peer hub, dynamic discovery (`--discover`) and mDNS discovery
+  (`--mdns`) as trusted-segment features. They learn peers from the network
+  *without authenticating them*. Where a peer allowlist is offered it is
+  **misconfiguration hygiene** (catching the wrong host dialing in), **not** a
+  defence against a hostile one.
+
+If you must cross an untrusted network, run cannelloni **inside** a transport
+that does provide authentication and confidentiality (e.g. WireGuard, IPsec or
+an SSH tunnel).
+
 # Ecosystem
 
 - https://github.com/PhilippFux/ESP32_CAN_Interface
@@ -46,6 +70,11 @@ If you do not want or need SCTP support, you can disable it
 by setting `-DSCTP_SUPPORT=OFF`.
 SCTP support is also disabled if you don't have `lksctp-tools`
 installed.
+
+Optional mDNS/zeroconf peer discovery (see [mDNS / zeroconf
+discovery](#mdns--zeroconf-discovery)) is built when `libavahi-client` is
+present and can be turned off with `-DAVAHI_SUPPORT=OFF`. It is also disabled
+automatically if Avahi is not installed.
 
 ## Installation
 
@@ -232,8 +261,40 @@ Only discovered peers are evicted — **statically configured `--peer`/`-R` peer
 are never aged out**, so a static peer that is briefly down resumes
 automatically when it returns (its frames meanwhile hit the drop-oldest egress
 ring rather than growing without bound). Discovery is **unauthenticated** and
-must be confined to a trusted network (see the trust model); the cap is
-misconfiguration hygiene, not a security control.
+must be confined to a trusted network (see the [Trust model](#trust-model)); the
+cap is misconfiguration hygiene, not a security control.
+
+#### mDNS / zeroconf discovery
+
+If cannelloni was built with Avahi support (`AVAHI_SUPPORT`, on by default when
+`libavahi-client` is present), the hub can discover peers over **mDNS/zeroconf**
+rather than being told about them. Enable it with `--mdns`:
+
+```
+# mDNS hub: advertise + browse the LAN, no peer config at all
+cannelloni -I vcan0 -l 20000 --mdns
+```
+
+Each instance advertises a `_cannelloni._udp` service on its transport port and
+browses the LAN for the same service, so two or more instances on a segment find
+each other and form a hub with **no static configuration** — each learns the
+others' address and port *before* any CAN data flows. A running `avahi-daemon`
+is required.
+
+mDNS is a sibling of (not a replacement for) `--discover`: a resolved peer joins
+the same dynamic-peer set, so `--max-peers` and `--peer-timeout` apply
+identically (a peer that later falls silent ages out and is re-learnt from its
+own traffic). An instance **never peers with itself** — it skips its own
+advertisement.
+
+The advertised TXT records carry the protocol version, the CAN interface name
+and the **CAN-FD capability**, and a peer whose protocol version or CAN-FD
+capability does not match ours is **skipped**. So a classic-CAN node and a
+CAN-FD node on the same LAN will not auto-peer into the undefined
+mixed-FD/classic case (caveat below); use an explicit `--peer` if you really
+intend to bridge them. Like all discovery here, mDNS is **unauthenticated** and
+link-local — keep it on a trusted segment (see the [Trust
+model](#trust-model)). Build it out entirely with `-DAVAHI_SUPPORT=OFF`.
 
 Notes and limits:
 
@@ -252,7 +313,8 @@ Notes and limits:
   and are out of scope; keep the topology a star of single-peer leaves around
   one hub.
 - The port must be kept on a trusted network: there is no peer authentication
-  (see the trust model), so any reachable host can inject CAN frames.
+  (see the [Trust model](#trust-model)), so any reachable host can inject CAN
+  frames.
 
 ## SCTP
 
@@ -324,8 +386,9 @@ backlog is bounded and the oldest frames are dropped under overload (a
 hopelessly stuck client is disconnected and may reconnect). Like the UDP hub,
 ordering is preserved **per-link**, not globally; the CAN bitrate is the hard
 ceiling for hub→CAN traffic; and the port must be kept on a trusted network
-(there is no peer authentication). Hub-to-hub topologies are out of scope —
-keep a star of single-peer leaves around one hub.
+(there is no peer authentication — see the [Trust model](#trust-model)).
+Hub-to-hub topologies are out of scope — keep a star of single-peer leaves
+around one hub.
 
 Each accepted client owns an egress pool sized by `--buffer-frames`/
 `--buffer-max`, so the hub's RAM scales with the number of connected clients
