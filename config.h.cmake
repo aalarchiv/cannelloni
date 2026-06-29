@@ -21,3 +21,4 @@
 #pragma once
 
 #cmakedefine SCTP_SUPPORT
+#cmakedefine AVAHI_SUPPORT

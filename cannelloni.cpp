@@ -51,6 +51,10 @@
 #include "sctpthread.h"
 #endif
 
+#ifdef AVAHI_SUPPORT
+#include "mdns.h"
+#endif
+
 #include "canthread.h"
 #include "csvmapparser.h"
 #include "framebuffer.h"
@@ -88,6 +92,9 @@ void printUsage() {
   std::cout << "\t --discover \t\t learn UDP peers at runtime from valid traffic (hub, off by default)" << std::endl;
   std::cout << "\t --max-peers N \t\t cap on discovered UDP peers / accepted TCP server clients, default: 16" << std::endl;
   std::cout << "\t --peer-timeout SEC \t evict a discovered peer after SEC seconds of silence (0=never), default: 30" << std::endl;
+#ifdef AVAHI_SUPPORT
+  std::cout << "\t --mdns \t\t discover UDP peers via mDNS/Avahi zeroconf (hub, off by default)" << std::endl;
+#endif
   std::cout << "\t --buffer-frames N \t per-participant egress pool: frames preallocated, default: 1000" << std::endl;
   std::cout << "\t --buffer-max N \t\t per-participant egress pool: hard cap on frames (0=unlimited), default: 16000" << std::endl;
   std::cout << "\t -I INTERFACE \t\t can interface, default: vcan0" << std::endl;
@@ -180,6 +187,7 @@ enum {
   OPT_PEER_TIMEOUT,
   OPT_BUFFER_FRAMES,
   OPT_BUFFER_MAX,
+  OPT_MDNS,
 };
 
 /*
@@ -263,6 +271,8 @@ int main(int argc, char **argv) {
   bool discover = false;
   size_t maxPeers = 16;
   uint32_t peerTimeoutSec = 30;
+  /* mDNS/Avahi zeroconf peer discovery (cannelloni-84a.7, --mdns). */
+  bool useMdns = false;
   /* Per-participant egress FrameBuffer pool sizing (see framebuffer.h). */
   size_t bufferFrames = DEFAULT_BUFFER_FRAMES;
   size_t bufferMax = DEFAULT_BUFFER_MAX;
@@ -284,6 +294,7 @@ int main(int argc, char **argv) {
     {"peer-timeout",  required_argument, 0, OPT_PEER_TIMEOUT},
     {"buffer-frames", required_argument, 0, OPT_BUFFER_FRAMES},
     {"buffer-max",    required_argument, 0, OPT_BUFFER_MAX},
+    {"mdns",          no_argument,       0, OPT_MDNS},
     {0, 0, 0, 0}
   };
 
@@ -309,6 +320,17 @@ int main(int argc, char **argv) {
         break;
       case OPT_BUFFER_MAX:
         bufferMax = static_cast<size_t>(strtoul(optarg, NULL, 10));
+        break;
+      case OPT_MDNS:
+#ifdef AVAHI_SUPPORT
+        useMdns = true;
+#else
+        std::cout << "Usage Error: " << std::endl
+                  << "mDNS discovery is not supported in this build." << std::endl
+                  << std::endl;
+        printUsage();
+        return -1;
+#endif
         break;
       case 'C':
         switch (optarg[0]) {
@@ -458,20 +480,21 @@ int main(int argc, char **argv) {
     }
   }
 
-  /* The hub (static peers or dynamic discovery) is UDP-only in this phase. */
-  if ((!peerSpecs.empty() || discover) && (useTCP || useSCTP)) {
+  /* The hub (static peers or dynamic discovery, traffic- or mDNS-learnt) is
+   * UDP-only in this phase. */
+  if ((!peerSpecs.empty() || discover || useMdns) && (useTCP || useSCTP)) {
     std::cout << "Usage Error: " << std::endl
-              << "--peer/--peers-file/--discover is only supported for UDP" << std::endl
+              << "--peer/--peers-file/--discover/--mdns is only supported for UDP" << std::endl
               << std::endl;
     printUsage();
     return -1;
   }
 
   /* A discovery hub may start with no peers at all and learn them at runtime,
-   * so -R/--peer is not required when --discover is set. */
-  if (!remoteIPSupplied && peerSpecs.empty() && !discover && !useSCTP && !useTCP) {
+   * so -R/--peer is not required when --discover or --mdns is set. */
+  if (!remoteIPSupplied && peerSpecs.empty() && !discover && !useMdns && !useSCTP && !useTCP) {
     std::cout << "Usage Error: " << std::endl
-              << "Remote IP not supplied (use -R, --peer or --discover for UDP)" << std::endl
+              << "Remote IP not supplied (use -R, --peer, --discover or --mdns for UDP)" << std::endl
               << std::endl;
     printUsage();
     return -1;
@@ -615,6 +638,12 @@ int main(int argc, char **argv) {
   /* Per-network-peer egress buffers, owned here (outlive the threads). */
   std::vector<std::unique_ptr<FrameBuffer>> netFrameBuffers;
 
+#ifdef AVAHI_SUPPORT
+  /* The UDP hub thread, captured for the mDNS backend's resolve callback (which
+   * hands discovered addresses to it). Null unless this is a UDP mDNS hub. */
+  UDPThread *mdnsTarget = nullptr;
+#endif
+
   std::unique_ptr<ConnectionThread> netThread;
   if (useTCP && tcpRole == TCP_SERVER) {
     /*
@@ -707,9 +736,15 @@ int main(int argc, char **argv) {
     /*
      * Dynamic discovery: the thread learns/evicts peers at runtime, mutating
      * the same registry the Router reads (serialised by the registry mutex).
+     * mDNS feeds the same machinery (proactively adding peers it resolves), so
+     * a discovered peer ages out / re-learns by traffic exactly like Phase 3.
      */
-    if (discover)
+    if (discover || useMdns)
       udpThread->enableDiscovery(&registry, maxPeers, peerTimeoutSec);
+#ifdef AVAHI_SUPPORT
+    if (useMdns)
+      mdnsTarget = udpThread.get();
+#endif
 
     netThread = std::move(udpThread);
   }
@@ -734,6 +769,29 @@ int main(int argc, char **argv) {
 
   int netStartReturn = netThread->start();
   int canStartReturn = canThread->start();
+
+#ifdef AVAHI_SUPPORT
+  /*
+   * Start mDNS discovery only once both data threads are up: the CAN thread has
+   * by now negotiated CAN-FD (advertised in the TXT records) and the UDP socket
+   * is bound to receive the peers we are about to announce ourselves to. The
+   * resolve callback runs on Avahi's own thread and just hands the address to
+   * the UDP net thread (queueDiscoveredPeer), so no peer state is touched here.
+   */
+  std::unique_ptr<MdnsDiscovery> mdns;
+  if (mdnsTarget != nullptr && netStartReturn == 0 && canStartReturn == 0) {
+    mdns = std::make_unique<MdnsDiscovery>(
+        addressFamily, localPort, canInterfaceName, canThread->isCanFd(),
+        static_cast<uint8_t>(CANNELLONI_FRAME_VERSION),
+        [mdnsTarget](const struct sockaddr_storage &addr) {
+          mdnsTarget->queueDiscoveredPeer(addr);
+        });
+    if (!mdns->start()) {
+      lwarn << "mDNS discovery could not start; continuing without it." << std::endl;
+      mdns.reset();
+    }
+  }
+#endif
 
   while (netStartReturn == 0 && canStartReturn == 0) {
     struct timeval timeout;
@@ -765,6 +823,13 @@ int main(int argc, char **argv) {
       }
     }
   }
+
+#ifdef AVAHI_SUPPORT
+  /* Stop mDNS first: this joins the Avahi control thread, so no resolve
+   * callback can queue a peer into the UDP thread once it begins shutting down. */
+  if (mdns)
+    mdns->stop();
+#endif
 
   netThread->stop();
   netThread->join();

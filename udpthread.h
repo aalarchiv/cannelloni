@@ -22,6 +22,7 @@
 
 #include <map>
 #include <memory>
+#include <mutex>
 #include <unordered_map>
 #include <vector>
 
@@ -121,6 +122,17 @@ class UDPThread : public ConnectionThread {
     void enableDiscovery(PeerRegistry *registry, size_t maxPeers, uint32_t peerTimeoutSec);
 
     /*
+     * Hand a peer address learnt by an external discovery backend (mDNS/Avahi,
+     * cannelloni-84a.7) to the data path. THREAD-SAFE: it is called from the
+     * Avahi control thread, so it only enqueues the address and wakes the net
+     * thread, which actually adds the peer (drainDiscoveredPeers) under the
+     * registry lock -- keeping all m_peers/registry mutation single-writer, like
+     * the Phase 3 traffic-learning path. The peer becomes an ordinary dynamic
+     * peer (same liveness/eviction sweep). Requires enableDiscovery() first.
+     */
+    void queueDiscoveredPeer(const struct sockaddr_storage &addr);
+
+    /*
      * Set the pool sizing for egress buffers this thread allocates itself, i.e.
      * those of dynamically discovered peers (static peers' buffers are sized by
      * main). frames are preallocated; the pool grows to at most max (0 =
@@ -154,6 +166,9 @@ class UDPThread : public ConnectionThread {
     void sweepDeadPeers();
     /* Parse a received datagram and route each frame with the resolved origin. */
     void handleDatagram(uint8_t *buffer, uint16_t len, struct sockaddr_storage *clientAddr);
+    /* Drain addresses queued by queueDiscoveredPeer() and learn any not already
+     * known as peers. Net thread only; runs off the periodic block timer. */
+    void drainDiscoveredPeers();
 
   protected:
     struct debugOptions_t m_debugOptions;
@@ -202,6 +217,15 @@ class UDPThread : public ConnectionThread {
     /* Pool sizing for egress buffers this thread allocates (discovered peers). */
     size_t m_egressPoolFrames = DEFAULT_BUFFER_FRAMES;
     size_t m_egressPoolMax = DEFAULT_BUFFER_MAX;
+
+    /*
+     * Inbox of peer addresses produced by an external discovery backend (mDNS,
+     * cannelloni-84a.7). The Avahi control thread appends here under the mutex
+     * and wakes the net thread (m_blockTimer.fire()); the net thread drains it
+     * in drainDiscoveredPeers(), so the producer never touches m_peers/registry.
+     */
+    std::mutex m_discoveryInboxMutex;
+    std::vector<struct sockaddr_storage> m_discoveryInbox;
 };
 
 }

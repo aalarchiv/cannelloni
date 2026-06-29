@@ -49,6 +49,11 @@ class CANThread : public ConnectionThread {
 
     virtual void transmitFrame(canfd_frame *frame, PeerId target);
 
+    /* Whether the CAN interface negotiated CAN-FD (its MTU is CANFD_MTU).
+     * Valid after start(); advertised over mDNS so peers can pre-filter on
+     * CAN-FD capability (cannelloni-84a.7). */
+    bool isCanFd() const { return m_canfd; }
+
   private:
     void transmitBuffer();
     void fireTimer();

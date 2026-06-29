@@ -13,6 +13,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 # Options
 option(SCTP_SUPPORT "SCTP_SUPPORT" ON)
+option(AVAHI_SUPPORT "AVAHI_SUPPORT" ON)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -30,6 +31,23 @@ if(NOT SCTP_FOUND AND SCTP_SUPPORT)
   message(STATUS "SCTP not found. cannelloni will be build without SCTP support.")
   message(STATUS "Install lksctp-tools for SCTP.")
 endif(NOT SCTP_FOUND AND SCTP_SUPPORT)
+
+# Optional mDNS/Avahi zeroconf peer discovery (cannelloni-84a.7). Mirrors the
+# SCTP_SUPPORT pattern: on by default, but silently disabled (the feature is
+# fully optional) if the Avahi client library is not present.
+if(AVAHI_SUPPORT)
+  find_package(PkgConfig QUIET)
+  if(PkgConfig_FOUND)
+    pkg_check_modules(AVAHI IMPORTED_TARGET avahi-client)
+  endif()
+  if(NOT AVAHI_FOUND)
+    set(AVAHI_SUPPORT OFF)
+    message(STATUS "Avahi (avahi-client) not found. Building without mDNS discovery.")
+    message(STATUS "Install libavahi-client for mDNS peer discovery.")
+  endif()
+else(AVAHI_SUPPORT)
+  message(STATUS "Building cannelloni without mDNS discovery (AVAHI_SUPPORT=OFF)")
+endif(AVAHI_SUPPORT)
 
 CONFIGURE_FILE(
   ${CMAKE_CURRENT_SOURCE_DIR}/config.h.cmake
@@ -51,7 +69,8 @@ add_library(addsources STATIC
             tcp_server_thread.cpp
             canthread.cpp
             router.cpp
-            peerregistry.cpp)
+            peerregistry.cpp
+            mdns.cpp)
 
 add_library(cannelloni-common SHARED
             parser.cpp
@@ -74,6 +93,12 @@ if(SCTP_SUPPORT)
     target_link_libraries(sctpthread addsources sctp)
     target_link_libraries(addsources sctpthread)
 endif(SCTP_SUPPORT)
+# mdns.cpp is compiled unconditionally but is an empty translation unit unless
+# AVAHI_SUPPORT is defined (config.h), so only link the Avahi client library when
+# the feature is enabled. The dependency propagates to the cannelloni executable.
+if(AVAHI_SUPPORT)
+    target_link_libraries(addsources PkgConfig::AVAHI)
+endif(AVAHI_SUPPORT)
 set_target_properties(addsources PROPERTIES LIBRARY_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
 target_link_libraries(cannelloni addsources cannelloni-common-static pthread)
 target_compile_features(cannelloni PRIVATE cxx_auto_type)

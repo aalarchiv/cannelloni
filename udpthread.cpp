@@ -208,7 +208,9 @@ void UDPThread::run() {
     }
     if (FD_ISSET(m_blockTimer.getFd(), &readfds)) {
       m_blockTimer.read();
-      /* Periodic liveness sweep; no-op unless discovery + a timeout are set. */
+      /* Add any peers an external backend (mDNS) resolved since the last wake,
+       * then run the periodic liveness sweep. Both no-op unless enabled. */
+      drainDiscoveredPeers();
       sweepDeadPeers();
     }
     if (FD_ISSET(m_socket, &readfds)) {
@@ -350,6 +352,39 @@ UdpPeer *UDPThread::learnPeer(const struct sockaddr_storage *clientAddr) {
   linfo << "Discovered UDP peer " << formatSocketAddress(getSocketAddress(clientAddr))
         << " as participant " << id << " (" << m_dynamicCount << " dynamic)" << std::endl;
   return raw;
+}
+
+void UDPThread::queueDiscoveredPeer(const struct sockaddr_storage &addr) {
+  {
+    std::lock_guard<std::mutex> lock(m_discoveryInboxMutex);
+    m_discoveryInbox.push_back(addr);
+  }
+  /*
+   * Wake the net thread so it drains the inbox promptly (firing the block timer
+   * from another thread is just a timerfd write, the same pattern stop() uses).
+   * Worst case the 500 ms block timer would pick it up anyway.
+   */
+  m_blockTimer.fire();
+}
+
+void UDPThread::drainDiscoveredPeers() {
+  /* Swap the inbox out under the lock so the Avahi thread can keep appending
+   * while we add peers (learnPeer takes the registry lock, which can block). */
+  std::vector<struct sockaddr_storage> pending;
+  {
+    std::lock_guard<std::mutex> lock(m_discoveryInboxMutex);
+    if (m_discoveryInbox.empty())
+      return;
+    pending.swap(m_discoveryInbox);
+  }
+  for (const struct sockaddr_storage &addr : pending) {
+    /* Idempotent: mDNS resolves repeatedly, and the peer may also have been
+     * learnt from its own traffic already. Only learn genuinely new sources. */
+    if (resolveOrigin(&addr) == nullptr) {
+      if (learnPeer(&addr) != nullptr)
+        linfo << "mDNS: added peer " << formatSocketAddress(getSocketAddress(&addr)) << std::endl;
+    }
+  }
 }
 
 void UDPThread::sweepDeadPeers() {

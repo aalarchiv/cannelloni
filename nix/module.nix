@@ -41,13 +41,26 @@ in
         default. Trusted networks only -- discovery is unauthenticated by design.
       '';
     };
+    mdns = mkOption {
+      type = types.bool;
+      default = false;
+      description = ''
+        Enable mDNS/Avahi zeroconf peer discovery (hub only). When set,
+        cannelloni advertises itself and browses the LAN for other instances,
+        learning peers (address + port) before any data flows, and may run with
+        an empty static peer list. Feeds the same dynamic-peer machinery as
+        discover (peers age out / re-learn by traffic), so maxPeers and
+        peerTimeout apply. Requires a running avahi-daemon (services.avahi). UDP
+        only; off by default. Trusted networks only -- unauthenticated by design.
+      '';
+    };
     maxPeers = mkOption {
       type = types.int;
       default = 16;
       description = ''
-        Cap on dynamically discovered UDP peers (with discover = true) or
-        simultaneously accepted TCP server clients. Matches the cannelloni
-        --max-peers default of 16 when left unset.
+        Cap on dynamically discovered UDP peers (with discover = true or
+        mdns = true) or simultaneously accepted TCP server clients. Matches the
+        cannelloni --max-peers default of 16 when left unset.
       '';
     };
     peerTimeout = mkOption {
@@ -123,14 +136,21 @@ in
       # A non-empty peer list makes this a UDP hub: emit repeatable --peer and
       # drop -R/-p (peers carry their own addresses; sources are matched by them).
       peerArgs = lib.concatStringsSep " " (map (p: "--peer ${p}") cfg.peers);
-      # A discovery hub may run with no static remote at all (it learns peers).
+      # A discovery hub (traffic- or mDNS-learnt) may run with no static remote
+      # at all (it learns peers).
       remoteAddress =
         if cfg.peers != [ ] then ""
         else if cfg.remoteAddress != null then "-R ${cfg.remoteAddress}"
-        else if cfg.discover then ""
+        else if (cfg.discover || cfg.mdns) then ""
         else "-p";
-      discoverArgs = lib.optionalString cfg.discover
-        "--discover --max-peers ${builtins.toString cfg.maxPeers} --peer-timeout ${builtins.toString cfg.peerTimeout}";
+      # --discover / --mdns are sibling discovery backends; both feed the same
+      # dynamic-peer machinery, so the cap + liveness knobs apply to either.
+      discoverArgs = lib.concatStringsSep " " (
+        lib.optional cfg.discover "--discover"
+        ++ lib.optional cfg.mdns "--mdns"
+        ++ lib.optional (cfg.discover || cfg.mdns)
+          "--max-peers ${builtins.toString cfg.maxPeers} --peer-timeout ${builtins.toString cfg.peerTimeout}"
+      );
       # Egress pool sizing: emit only when overridden so the default command line
       # (and every existing test) is left byte-for-byte unchanged.
       bufferArgs = lib.concatStringsSep " " (
