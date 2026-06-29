@@ -11,7 +11,7 @@ testers.nixosTest {
           ./common.nix
         ];
         networking.firewall.enable = false;
-        services.cannellonis = {
+        services.cannelloni = {
           enable = true;
           transport = "sctp";
           ipProtocol = "ipv4";
@@ -28,7 +28,7 @@ testers.nixosTest {
           ./common.nix
         ];
         networking.firewall.enable = false;
-        services.cannellonis = {
+        services.cannelloni = {
           enable = true;
           transport = "sctp";
           ipProtocol = "ipv4";
@@ -44,8 +44,8 @@ testers.nixosTest {
 
   testScript = ''
     start_all()
-    node_a.wait_for_unit("cannellonis")
-    node_b.wait_for_unit("cannellonis")
+    node_a.wait_for_unit("cannelloni")
+    node_b.wait_for_unit("cannelloni")
     node_b.wait_until_succeeds("journalctl | grep 'run:Connected'")
 
     node_a.succeed("${pkgs.can-utils}/bin/cangen vcan0 -n 1 -D 11223344DEADBEEF -L 8")

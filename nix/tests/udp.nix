@@ -11,7 +11,7 @@ testers.nixosTest {
           ./common.nix
         ];
         networking.firewall.enable = false;
-        services.cannellonis = {
+        services.cannelloni = {
           enable = true;
           transport = "udp";
           ipProtocol = "ipv4";
@@ -29,7 +29,7 @@ testers.nixosTest {
           ./common.nix
         ];
         networking.firewall.enable = false;
-        services.cannellonis = {
+        services.cannelloni = {
           enable = true;
           transport = "udp";
           ipProtocol = "ipv4";
@@ -44,8 +44,8 @@ testers.nixosTest {
 
   testScript = ''
     start_all()
-    node_a.wait_for_unit("cannellonis")
-    node_b.wait_for_unit("cannellonis")
+    node_a.wait_for_unit("cannelloni")
+    node_b.wait_for_unit("cannelloni")
     node_a.wait_until_succeeds("journalctl | grep 'UDPThread up and running'")
     node_b.wait_until_succeeds("journalctl | grep 'UDPThread up and running'")
 

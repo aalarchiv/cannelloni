@@ -28,7 +28,7 @@ testers.nixosTest {
           ];
           networking.firewall.enable = false;
           services.setup_can.mtu = 72; # CANFD_MTU -> CAN-FD negotiated
-          services.cannellonis = {
+          services.cannelloni = {
             enable = true;
             transport = "udp";
             ipProtocol = "ipv4";
@@ -45,13 +45,13 @@ testers.nixosTest {
         { ... }:
         {
           imports = [ common ];
-          services.cannellonis.remoteAddress = "node_b";
+          services.cannelloni.remoteAddress = "node_b";
         };
       node_b =
         { ... }:
         {
           imports = [ common ];
-          services.cannellonis.remoteAddress = "node_a";
+          services.cannelloni.remoteAddress = "node_a";
         };
     };
 
@@ -94,8 +94,8 @@ testers.nixosTest {
         node.succeed("; ".join("cansend vcan0 %s" % f for f in frames))
 
     start_all()
-    node_a.wait_for_unit("cannellonis")
-    node_b.wait_for_unit("cannellonis")
+    node_a.wait_for_unit("cannelloni")
+    node_b.wait_for_unit("cannelloni")
     node_a.wait_until_succeeds("journalctl | grep 'UDPThread up and running'")
     node_b.wait_until_succeeds("journalctl | grep 'UDPThread up and running'")
     node_a.wait_until_succeeds("journalctl | grep 'CANThread up and running'")
@@ -154,8 +154,8 @@ testers.nixosTest {
     # Flooding leaves a draining backlog, so this is the final subtest.
     node_a.succeed("cangen vcan0 -g 0 -I i -D r -L 8 -n 5000")
     # No crash / deadlock under overload.
-    node_a.succeed("systemctl is-active cannellonis")
-    node_b.succeed("systemctl is-active cannellonis")
+    node_a.succeed("systemctl is-active cannelloni")
+    node_b.succeed("systemctl is-active cannelloni")
     # Recovery: once the backlog drains a fresh frame still gets through.
     node_b.execute("pkill -x candump 2>/dev/null; true")
     node_b.execute("rm -f /tmp/cap.log")

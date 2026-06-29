@@ -34,11 +34,11 @@
       packages = forAllSystems (
         system:
         let
-          cannellonis = (nixpkgsFor.${system}).cannellonis;
+          cannelloni = (nixpkgsFor.${system}).cannelloni;
         in
         {
-          inherit cannellonis;
-          default = cannellonis;
+          inherit cannelloni;
+          default = cannelloni;
         }
       );
 

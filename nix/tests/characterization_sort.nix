@@ -1,5 +1,5 @@
 { testers, pkgs }:
-# Characterization of the UDP frame-sorting path (cannellonis -s), part of
+# Characterization of the UDP frame-sorting path (cannelloni -s), part of
 # issue cannelloni-84a.8 (Phase 0). This lives in its own test because -s is a
 # start-up flag: the sender must sort, which is incompatible with the FIFO
 # ordering checked in characterization.nix on the same instance.
@@ -24,7 +24,7 @@ testers.nixosTest {
             ./common.nix
           ];
           networking.firewall.enable = false;
-          services.cannellonis = {
+          services.cannelloni = {
             enable = true;
             transport = "udp";
             ipProtocol = "ipv4";
@@ -39,13 +39,13 @@ testers.nixosTest {
         { ... }:
         {
           imports = [ common ];
-          services.cannellonis.remoteAddress = "node_b";
+          services.cannelloni.remoteAddress = "node_b";
         };
       node_b =
         { ... }:
         {
           imports = [ common ];
-          services.cannellonis.remoteAddress = "node_a";
+          services.cannelloni.remoteAddress = "node_a";
         };
     };
 
@@ -83,8 +83,8 @@ testers.nixosTest {
         return res.returncode
 
     start_all()
-    node_a.wait_for_unit("cannellonis")
-    node_b.wait_for_unit("cannellonis")
+    node_a.wait_for_unit("cannelloni")
+    node_b.wait_for_unit("cannelloni")
     node_a.wait_until_succeeds("journalctl | grep 'UDPThread up and running'")
     node_b.wait_until_succeeds("journalctl | grep 'UDPThread up and running'")
 

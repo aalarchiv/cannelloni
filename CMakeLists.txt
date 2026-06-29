@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.15)
-project(cannellonis)
+project(cannelloni)
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake/modules")
 
@@ -23,12 +23,12 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Werror")
 if(SCTP_SUPPORT)
   include(FindSCTP)
 else(SCTP_SUPPORT)
-  message(STATUS "Building cannellonis without SCTP support (SCTP_SUPPORT=OFF)")
+  message(STATUS "Building cannelloni without SCTP support (SCTP_SUPPORT=OFF)")
 endif(SCTP_SUPPORT)
 
 if(NOT SCTP_FOUND AND SCTP_SUPPORT)
   set(SCTP_SUPPORT OFF)
-  message(STATUS "SCTP not found. cannellonis will be build without SCTP support.")
+  message(STATUS "SCTP not found. cannelloni will be build without SCTP support.")
   message(STATUS "Install lksctp-tools for SCTP.")
 endif(NOT SCTP_FOUND AND SCTP_SUPPORT)
 
@@ -46,7 +46,7 @@ if(AVAHI_SUPPORT)
     message(STATUS "Install libavahi-client for mDNS peer discovery.")
   endif()
 else(AVAHI_SUPPORT)
-  message(STATUS "Building cannellonis without mDNS discovery (AVAHI_SUPPORT=OFF)")
+  message(STATUS "Building cannelloni without mDNS discovery (AVAHI_SUPPORT=OFF)")
 endif(AVAHI_SUPPORT)
 
 CONFIGURE_FILE(
@@ -95,7 +95,7 @@ if(SCTP_SUPPORT)
 endif(SCTP_SUPPORT)
 # mdns.cpp is compiled unconditionally but is an empty translation unit unless
 # AVAHI_SUPPORT is defined (config.h), so only link the Avahi client library when
-# the feature is enabled. The dependency propagates to the cannellonis executable.
+# the feature is enabled. The dependency propagates to the cannelloni executable.
 if(AVAHI_SUPPORT)
     target_link_libraries(addsources PkgConfig::AVAHI)
 endif(AVAHI_SUPPORT)

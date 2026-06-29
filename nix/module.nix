@@ -5,20 +5,20 @@
   ...
 }:
 let
-  cfg = config.services.cannellonis;
+  cfg = config.services.cannelloni;
 in
 {
-  options.services.cannellonis = with lib; {
-    enable = mkEnableOption "enable cannellonis service";
+  options.services.cannelloni = with lib; {
+    enable = mkEnableOption "enable cannelloni service";
     canInterface = mkOption {
       type = types.str;
       default = "can0";
-      description = "cannellonis will run on this CAN interface";
+      description = "cannelloni will run on this CAN interface";
     };
     remoteAddress = mkOption {
       type = types.nullOr types.str;
       default = null;
-      description = "IP Address of the remote cannellonis instance. Optional for UDP";
+      description = "IP Address of the remote cannelloni instance. Optional for UDP";
     };
     peers = mkOption {
       type = types.listOf types.str;
@@ -26,7 +26,7 @@ in
       example = [ "node_b" "node_c:20000" ];
       description = ''
         UDP hub peers as HOST[:PORT] (PORT defaults to remotePort). When
-        non-empty, cannellonis runs as a multi-peer hub: each entry is emitted as
+        non-empty, cannelloni runs as a multi-peer hub: each entry is emitted as
         a repeatable --peer argument and -R/-p is omitted.
       '';
     };
@@ -34,7 +34,7 @@ in
       type = types.bool;
       default = false;
       description = ''
-        Enable dynamic UDP peer discovery (hub only). When set, cannellonis learns
+        Enable dynamic UDP peer discovery (hub only). When set, cannelloni learns
         peers at runtime from valid incoming traffic and may run with an empty
         static peer list, so devices can dial in without static config. Evicts a
         discovered peer after peerTimeout seconds of silence. UDP only; off by
@@ -46,7 +46,7 @@ in
       default = false;
       description = ''
         Enable mDNS/Avahi zeroconf peer discovery (hub only). When set,
-        cannellonis advertises itself and browses the LAN for other instances,
+        cannelloni advertises itself and browses the LAN for other instances,
         learning peers (address + port) before any data flows, and may run with
         an empty static peer list. Feeds the same dynamic-peer machinery as
         discover (peers age out / re-learn by traffic), so maxPeers and
@@ -60,7 +60,7 @@ in
       description = ''
         Cap on dynamically discovered UDP peers (with discover = true or
         mdns = true) or simultaneously accepted TCP server clients. Matches the
-        cannellonis --max-peers default of 16 when left unset.
+        cannelloni --max-peers default of 16 when left unset.
       '';
     };
     peerTimeout = mkOption {
@@ -76,8 +76,8 @@ in
       default = null;
       description = ''
         Per-participant egress FrameBuffer pool: number of CAN frames
-        preallocated up front (cannellonis --buffer-frames). null leaves the
-        cannellonis default (1000). Lower it on a many-peer hub to cut the
+        preallocated up front (cannelloni --buffer-frames). null leaves the
+        cannelloni default (1000). Lower it on a many-peer hub to cut the
         baseline RAM, which scales as (peers + 1) x this.
       '';
     };
@@ -86,24 +86,24 @@ in
       default = null;
       description = ''
         Per-participant egress FrameBuffer pool: hard cap on frames the pool may
-        grow to (cannellonis --buffer-max, 0 = unlimited). null leaves the
-        cannellonis default (16000). Bounds the worst-case RAM of a many-peer hub.
+        grow to (cannelloni --buffer-max, 0 = unlimited). null leaves the
+        cannelloni default (16000). Bounds the worst-case RAM of a many-peer hub.
       '';
     };
     remotePort = mkOption {
       type = types.int;
       default = 10000;
-      description = "Port of the remote cannellonis instance";
+      description = "Port of the remote cannelloni instance";
     };
     localAddress = mkOption {
       type = types.str;
       default = "0.0.0.0";
-      description = "IP address of the local cannellonis instance";
+      description = "IP address of the local cannelloni instance";
     };
     localPort = mkOption {
       type = types.int;
       default = 10000;
-      description = "Port of the local cannellonis instance";
+      description = "Port of the local cannelloni instance";
     };
     transport = mkOption {
       type = types.enum [ "udp" "tcp" "sctp" ];
@@ -124,12 +124,12 @@ in
       type = types.listOf types.str;
       default = [ ];
       example = [ "-s" "-t" "1000000" ];
-      description = "extra command line arguments appended verbatim to cannellonis (e.g. -s to sort frames)";
+      description = "extra command line arguments appended verbatim to cannelloni (e.g. -s to sort frames)";
     };
   };
 
   config = lib.mkIf cfg.enable {
-    systemd.services.cannellonis =
+    systemd.services.cannelloni =
     let
       mode = if cfg.mode == "server" then "s" else "c";
       transportAndMode = if cfg.transport != "udp" then (if cfg.transport == "tcp" then "-C ${mode}" else "-S ${mode}") else "";
@@ -159,17 +159,17 @@ in
       );
       extraArgs = lib.concatStringsSep " " cfg.extraArgs;
     in {
-      description = "cannellonis";
+      description = "cannelloni";
       # With mDNS, order after avahi-daemon (Type=dbus) so its bus name is ready
-      # before cannellonis's Avahi client starts -- avoids losing the boot race
+      # before cannelloni's Avahi client starts -- avoids losing the boot race
       # where avahi_client_new hits a transient D-Bus error.
       after = [ "network.target" ] ++ lib.optional cfg.mdns "avahi-daemon.service";
       wants = lib.optional cfg.mdns "avahi-daemon.service";
       wantedBy = [ "multi-user.target" ];
 
       serviceConfig = {
-        ExecStart = "${pkgs.cannellonis}/bin/cannellonis ${transportAndMode} -I ${cfg.canInterface} -l ${builtins.toString cfg.localPort} -L ${cfg.localAddress} -r ${builtins.toString cfg.remotePort} ${remoteAddress} ${peerArgs} ${discoverArgs} ${bufferArgs} ${extraArgs}";
-        User="cannellonis";
+        ExecStart = "${pkgs.cannelloni}/bin/cannellonis ${transportAndMode} -I ${cfg.canInterface} -l ${builtins.toString cfg.localPort} -L ${cfg.localAddress} -r ${builtins.toString cfg.remotePort} ${remoteAddress} ${peerArgs} ${discoverArgs} ${bufferArgs} ${extraArgs}";
+        User="cannelloni";
         DynamicUser=true;
        };
     };

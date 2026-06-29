@@ -1,7 +1,7 @@
 { testers, pkgs }:
 # Acceptance test for mDNS/Avahi zeroconf peer discovery (cannelloni-84a.7).
 #
-# Every node runs cannellonis with --mdns and NO static peer config, plus a local
+# Every node runs cannelloni with --mdns and NO static peer config, plus a local
 # avahi-daemon. Each instance advertises "_cannelloni._udp" on its transport port
 # (with TXT records: protocol version + CAN-FD capability + interface) and
 # browses the LAN for the same service, so peers learn each other before any CAN
@@ -29,7 +29,7 @@ testers.nixosTest {
           ./common.nix
         ];
         networking.firewall.enable = false;
-        # avahi-daemon must be running for cannellonis's Avahi client to publish
+        # avahi-daemon must be running for cannelloni's Avahi client to publish
         # and browse. publish.enable is required or the daemon refuses ALL
         # publishing (disable-publishing=yes), including our client entry group;
         # publish.addresses makes it announce our host address so peers can
@@ -44,7 +44,7 @@ testers.nixosTest {
           };
         };
         services.setup_can.mtu = mtu;
-        services.cannellonis = {
+        services.cannelloni = {
           enable = true;
           transport = "udp";
           ipProtocol = "ipv4";
@@ -84,7 +84,7 @@ testers.nixosTest {
             return 0
 
     def log_count(node, needle):
-        rc, out = node.execute("journalctl -u cannellonis | grep -c '%s'" % needle)
+        rc, out = node.execute("journalctl -u cannelloni | grep -c '%s'" % needle)
         try:
             return int(out.strip())
         except ValueError:
@@ -110,7 +110,7 @@ testers.nixosTest {
     start_all()
     for n in nodes.values():
         n.wait_for_unit("avahi-daemon")
-        n.wait_for_unit("cannellonis")
+        n.wait_for_unit("cannelloni")
     for n in nodes.values():
         n.wait_until_succeeds("journalctl | grep 'UDPThread up and running'")
         n.wait_until_succeeds("journalctl | grep 'CANThread up and running'")
@@ -118,8 +118,8 @@ testers.nixosTest {
     # --- 1. mDNS discovery between the two compatible CAN-FD nodes ---------
     # No peer config: each must resolve and learn the other purely over mDNS.
     for n in fd_nodes.values():
-        n.wait_until_succeeds("journalctl -u cannellonis | grep 'mDNS: resolved peer'")
-        n.wait_until_succeeds("journalctl -u cannellonis | grep 'Discovered UDP peer'")
+        n.wait_until_succeeds("journalctl -u cannelloni | grep 'mDNS: resolved peer'")
+        n.wait_until_succeeds("journalctl -u cannelloni | grep 'Discovered UDP peer'")
     print("[discovery] node_a and node_b resolved each other over mDNS")
 
     # --- 2 + 3. Working hub + self-filter (no echo) -----------------------
@@ -129,8 +129,8 @@ testers.nixosTest {
     # --- 4. Capability pre-filter: the classic node_c is skipped ----------
     # node_a/node_b advertise canfd=1; node_c advertises canfd=0, so each side
     # refuses to peer across the mismatch (epic caveat 4 / acceptance #4).
-    node_a.wait_until_succeeds("journalctl -u cannellonis | grep 'mDNS: skipping incompatible'")
-    node_c.wait_until_succeeds("journalctl -u cannellonis | grep 'mDNS: skipping incompatible'")
+    node_a.wait_until_succeeds("journalctl -u cannelloni | grep 'mDNS: skipping incompatible'")
+    node_c.wait_until_succeeds("journalctl -u cannelloni | grep 'mDNS: skipping incompatible'")
     print("[capability] FD/classic mismatch skipped on both sides")
 
     # node_c never peers with the FD hub, so a frame on its bus must not reach
@@ -144,7 +144,7 @@ testers.nixosTest {
 
     # --- 5. The hub survived all of the above -----------------------------
     for n in nodes.values():
-        n.succeed("systemctl is-active cannellonis")
+        n.succeed("systemctl is-active cannelloni")
     print("[alive] all instances still running")
   '';
 }
