@@ -27,6 +27,7 @@
 #include <sys/stat.h>
 #include <sys/ioctl.h>
 #include <sys/select.h>
+#include <sys/socket.h>
 
 #include <linux/can/raw.h>
 #include <net/if.h>
@@ -46,6 +47,7 @@ CANThread::CANThread(const struct debugOptions_t &debugOptions, const std::strin
   , m_canInterfaceName(canInterfaceName)
   , m_rxCount(0)
   , m_txCount(0)
+  , m_rxDropCount(0)
 {
   memcpy(&m_debugOptions, &debugOptions, sizeof(struct debugOptions_t));
 }
@@ -89,6 +91,22 @@ int CANThread::start() {
     lerror << "CAN_FD is not supported on >" << m_canInterfaceName << "<" << std::endl;
   }
 
+  /*
+   * As a hub fans every ingested CAN frame out to N peers inline before the
+   * next recv(), the CAN RX critical path lengthens with the peer count and the
+   * kernel socket receive buffer can overflow under high bus load = silent
+   * frame loss at ingress, distinct from the bounded drop-oldest at egress
+   * (epic caveat 8). Mitigate by requesting a larger receive buffer (the kernel
+   * clamps to net.core.rmem_max), and enable SO_RXQ_OVFL so any overflow is
+   * surfaced via ancillary data on recvmsg() instead of being lost silently.
+   */
+  int rcvbuf = CAN_RX_BUFFER_BYTES;
+  if (setsockopt(m_canSocket, SOL_SOCKET, SO_RCVBUF, &rcvbuf, sizeof(rcvbuf)) < 0)
+    lwarn << "Could not enlarge CAN socket receive buffer." << std::endl;
+  int rxq_ovfl = 1;
+  if (setsockopt(m_canSocket, SOL_SOCKET, SO_RXQ_OVFL, &rxq_ovfl, sizeof(rxq_ovfl)) < 0)
+    lwarn << "Could not enable SO_RXQ_OVFL on the CAN socket; ingress drops will not be reported." << std::endl;
+
   if (bind(m_canSocket, (struct sockaddr *)&localAddr, sizeof(localAddr)) < 0) {
     lerror << "Could not bind to interface" << std::endl;
     return -1;
@@ -130,9 +148,20 @@ void CANThread::run() {
     }
     if (FD_ISSET(m_canSocket, &readfds)) {
       /* Read into an ingress-local frame; the Router copies it into each
-       * target's egress pool (the frame is never shared between buffers). */
+       * target's egress pool (the frame is never shared between buffers).
+       * recvmsg (not recv) so the SO_RXQ_OVFL ancillary counter rides along:
+       * it tells us how many frames the kernel dropped at ingress while the
+       * inline fan-out kept this loop from draining the socket (caveat 8). */
       struct canfd_frame frame;
-      receivedBytes = recv(m_canSocket, &frame, sizeof(struct canfd_frame), 0);
+      struct iovec iov = { &frame, sizeof(frame) };
+      char ctrl[CMSG_SPACE(sizeof(uint32_t))];
+      struct msghdr msg;
+      memset(&msg, 0, sizeof(msg));
+      msg.msg_iov = &iov;
+      msg.msg_iovlen = 1;
+      msg.msg_control = ctrl;
+      msg.msg_controllen = sizeof(ctrl);
+      receivedBytes = recvmsg(m_canSocket, &msg, 0);
       if (receivedBytes < 0) {
         if (errno == EWOULDBLOCK || errno == EAGAIN) {
           /* Timeout occurred */
@@ -143,6 +172,21 @@ void CANThread::run() {
         }
       } else if (receivedBytes == CAN_MTU || receivedBytes == CANFD_MTU) {
         m_rxCount++;
+        /* Surface any ingress overrun reported alongside this frame. The
+         * counter is cumulative since socket creation, so log the delta. */
+        for (struct cmsghdr *cmsg = CMSG_FIRSTHDR(&msg); cmsg != NULL;
+             cmsg = CMSG_NXTHDR(&msg, cmsg)) {
+          if (cmsg->cmsg_level == SOL_SOCKET && cmsg->cmsg_type == SO_RXQ_OVFL) {
+            uint32_t dropped;
+            memcpy(&dropped, CMSG_DATA(cmsg), sizeof(dropped));
+            if (dropped > m_rxDropCount) {
+              lwarn << "CAN ingress overrun: kernel dropped "
+                    << (dropped - m_rxDropCount) << " frame(s) (total " << dropped
+                    << ") -- socket RX buffer overflowed under load." << std::endl;
+              m_rxDropCount = dropped;
+            }
+          }
+        }
         /* If it is a CAN FD frame, encode this in len */
         if (receivedBytes == CANFD_MTU) {
           frame.len |= CANFD_FRAME;
@@ -161,7 +205,8 @@ void CANThread::run() {
   if (m_debugOptions.buffer) {
     m_frameBuffer->debug();
   }
-  linfo << "Shutting down. CAN Transmission Summary: TX: " << m_txCount << " RX: " << m_rxCount << std::endl;
+  linfo << "Shutting down. CAN Transmission Summary: TX: " << m_txCount << " RX: " << m_rxCount
+        << " ingress drops: " << m_rxDropCount << std::endl;
   shutdown(m_canSocket, SHUT_RDWR);
   close(m_canSocket);
 }

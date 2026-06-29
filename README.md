@@ -392,6 +392,23 @@ For example, a 16-peer hub that only needs to absorb short bursts might run
 `--buffer-frames 100 --buffer-max 2000` to keep both baseline and worst-case
 memory an order of magnitude below the defaults.
 
+## Ingress overrun
+
+The per-pool drop-oldest above bounds loss at *egress* — frames waiting to be
+written to a slow participant. A hub has a second, distinct loss point at
+*ingress*: each CAN frame read from the local bus is fanned out to every peer
+(allocate + copy + enqueue) inline before the next `recv()`, so at high bus
+load times many peers the kernel's CAN socket receive buffer can fill and the
+kernel drops frames *before* cannelloni ever sees them. This is invisible to
+the egress drop-oldest and to the receivers.
+
+cannelloni mitigates this by requesting a large CAN socket receive buffer
+(clamped by `net.core.rmem_max` — raise that sysctl if you run a busy
+many-peer hub) and reports any overrun rather than dropping silently: each
+event is logged as a `CAN ingress overrun` warning and the running total
+appears as `ingress drops` in the CAN shutdown summary. If you see those,
+reduce the bus load, lower the peer count, or raise `net.core.rmem_max`.
+
 # Frame sorting
 
 CAN frames can be sorted by their ID in each ethernet frame to write

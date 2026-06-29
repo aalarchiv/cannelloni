@@ -30,6 +30,14 @@ namespace cannelloni {
 
 #define CAN_TIMEOUT 2000000 /* 2 sec in us */
 
+/*
+ * Requested CAN socket receive buffer (SO_RCVBUF). The kernel clamps this to
+ * net.core.rmem_max (raise that sysctl to make a larger value effective); a
+ * deeper kernel queue lets the recv loop absorb the inline per-frame fan-out
+ * before overflowing under a high-rate burst (epic caveat 8).
+ */
+#define CAN_RX_BUFFER_BYTES (4 * 1024 * 1024)
+
 class CANThread : public ConnectionThread {
   public:
     CANThread(const struct debugOptions_t &debugOptions,
@@ -56,6 +64,13 @@ class CANThread : public ConnectionThread {
     /* Performance Counters */
     uint64_t m_rxCount;
     uint64_t m_txCount;
+    /*
+     * Cumulative count of frames the kernel dropped at CAN ingress because this
+     * socket's receive buffer was full while the inline per-frame fan-out ran
+     * (epic caveat 8). Read from the SO_RXQ_OVFL ancillary counter so the loss
+     * is observable instead of silent; reported in the shutdown summary.
+     */
+    uint64_t m_rxDropCount;
 };
 
 }
