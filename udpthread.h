@@ -120,6 +120,14 @@ class UDPThread : public ConnectionThread {
      */
     void enableDiscovery(PeerRegistry *registry, size_t maxPeers, uint32_t peerTimeoutSec);
 
+    /*
+     * Set the pool sizing for egress buffers this thread allocates itself, i.e.
+     * those of dynamically discovered peers (static peers' buffers are sized by
+     * main). frames are preallocated; the pool grows to at most max (0 =
+     * unlimited). Call before start(); defaults to DEFAULT_BUFFER_FRAMES/MAX.
+     */
+    void setEgressPoolSize(size_t frames, size_t max);
+
     void setTimeout(uint32_t timeout);
     uint32_t getTimeout();
 
@@ -190,6 +198,10 @@ class UDPThread : public ConnectionThread {
     uint64_t m_peerTimeoutNs = 0;
     PeerId m_nextPeerId = FIRST_NET_PEER_ID;
     size_t m_dynamicCount = 0;
+
+    /* Pool sizing for egress buffers this thread allocates (discovered peers). */
+    size_t m_egressPoolFrames = DEFAULT_BUFFER_FRAMES;
+    size_t m_egressPoolMax = DEFAULT_BUFFER_MAX;
 };
 
 }

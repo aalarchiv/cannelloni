@@ -123,9 +123,11 @@ namespace cannelloni {
    * a unique_ptr and is non-copyable.
    */
   struct TcpPeer {
-    TcpPeer(PeerId id, int fd, const struct sockaddr_storage &remoteAddr)
+    TcpPeer(PeerId id, int fd, const struct sockaddr_storage &remoteAddr,
+            size_t poolFrames = DEFAULT_BUFFER_FRAMES,
+            size_t poolMax = DEFAULT_BUFFER_MAX)
       : id(id), fd(fd), remoteAddr(remoteAddr)
-      , egressOwned(new FrameBuffer(1000, 16000))
+      , egressOwned(new FrameBuffer(poolFrames, poolMax))
       , egress(egressOwned.get())
     {}
     TcpPeer(const TcpPeer &) = delete;
@@ -189,6 +191,13 @@ namespace cannelloni {
        */
       void setRegistry(PeerRegistry *registry, size_t maxPeers);
 
+      /*
+       * Set the egress pool sizing applied to every accepted client's buffer
+       * (frames preallocated, grown to at most max; 0 = unlimited). Call before
+       * start(); defaults to DEFAULT_BUFFER_FRAMES/MAX.
+       */
+      void setEgressPoolSize(size_t frames, size_t max);
+
     private:
       /* epoll helpers (net thread only). */
       bool epollAdd(int fd, uint32_t events);
@@ -221,6 +230,9 @@ namespace cannelloni {
       PeerRegistry *m_registry;
       size_t m_maxPeers;
       PeerId m_nextPeerId;
+      /* Pool sizing for the egress buffer of each accepted client. */
+      size_t m_egressPoolFrames = DEFAULT_BUFFER_FRAMES;
+      size_t m_egressPoolMax = DEFAULT_BUFFER_MAX;
 
       /* Clients served by this thread; the unique_ptr keeps TcpPeer addresses
        * stable across vector growth so both indices stay valid. */

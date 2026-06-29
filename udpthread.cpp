@@ -254,6 +254,11 @@ void UDPThread::enableDiscovery(PeerRegistry *registry, size_t maxPeers, uint32_
   m_peerTimeoutNs = static_cast<uint64_t>(peerTimeoutSec) * 1000000000ull;
 }
 
+void UDPThread::setEgressPoolSize(size_t frames, size_t max) {
+  m_egressPoolFrames = frames;
+  m_egressPoolMax = max;
+}
+
 /* Compare two socket addresses by family, IP and port. */
 static bool sameSockaddr(const struct sockaddr_storage &a, const struct sockaddr_storage &b) {
   if (a.ss_family != b.ss_family)
@@ -317,7 +322,7 @@ UdpPeer *UDPThread::learnPeer(const struct sockaddr_storage *clientAddr) {
    * main). The UdpPeer is stored behind a unique_ptr, so the raw pointer we
    * hand to the registry stays valid across vector reallocation.
    */
-  auto egress = std::make_unique<FrameBuffer>(1000, 16000);
+  auto egress = std::make_unique<FrameBuffer>(m_egressPoolFrames, m_egressPoolMax);
   auto peer = std::make_unique<UdpPeer>(id, *clientAddr, egress.get());
   peer->egressOwned = std::move(egress);
   peer->dynamic = true;

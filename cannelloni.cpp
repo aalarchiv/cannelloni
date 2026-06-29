@@ -88,6 +88,8 @@ void printUsage() {
   std::cout << "\t --discover \t\t learn UDP peers at runtime from valid traffic (hub, off by default)" << std::endl;
   std::cout << "\t --max-peers N \t\t cap on discovered UDP peers / accepted TCP server clients, default: 16" << std::endl;
   std::cout << "\t --peer-timeout SEC \t evict a discovered peer after SEC seconds of silence (0=never), default: 30" << std::endl;
+  std::cout << "\t --buffer-frames N \t per-participant egress pool: frames preallocated, default: 1000" << std::endl;
+  std::cout << "\t --buffer-max N \t\t per-participant egress pool: hard cap on frames (0=unlimited), default: 16000" << std::endl;
   std::cout << "\t -I INTERFACE \t\t can interface, default: vcan0" << std::endl;
   std::cout << "\t -t timeout \t\t buffer timeout for can messages (us), default: 100000" << std::endl;
   std::cout << "\t -T table.csv \t\t path to csv with individual timeouts" << std::endl;
@@ -176,6 +178,8 @@ enum {
   OPT_DISCOVER,
   OPT_MAX_PEERS,
   OPT_PEER_TIMEOUT,
+  OPT_BUFFER_FRAMES,
+  OPT_BUFFER_MAX,
 };
 
 /*
@@ -259,6 +263,9 @@ int main(int argc, char **argv) {
   bool discover = false;
   size_t maxPeers = 16;
   uint32_t peerTimeoutSec = 30;
+  /* Per-participant egress FrameBuffer pool sizing (see framebuffer.h). */
+  size_t bufferFrames = DEFAULT_BUFFER_FRAMES;
+  size_t bufferMax = DEFAULT_BUFFER_MAX;
 
   struct debugOptions_t debugOptions = { /* can */ 0, /* udp */ 0, /* buffer */ 0, /* timer */ 0 };
 
@@ -270,11 +277,13 @@ int main(int argc, char **argv) {
 #endif
 
   static struct option long_options[] = {
-    {"peer",         required_argument, 0, OPT_PEER},
-    {"peers-file",   required_argument, 0, OPT_PEERS_FILE},
-    {"discover",     no_argument,       0, OPT_DISCOVER},
-    {"max-peers",    required_argument, 0, OPT_MAX_PEERS},
-    {"peer-timeout", required_argument, 0, OPT_PEER_TIMEOUT},
+    {"peer",          required_argument, 0, OPT_PEER},
+    {"peers-file",    required_argument, 0, OPT_PEERS_FILE},
+    {"discover",      no_argument,       0, OPT_DISCOVER},
+    {"max-peers",     required_argument, 0, OPT_MAX_PEERS},
+    {"peer-timeout",  required_argument, 0, OPT_PEER_TIMEOUT},
+    {"buffer-frames", required_argument, 0, OPT_BUFFER_FRAMES},
+    {"buffer-max",    required_argument, 0, OPT_BUFFER_MAX},
     {0, 0, 0, 0}
   };
 
@@ -294,6 +303,12 @@ int main(int argc, char **argv) {
         break;
       case OPT_PEER_TIMEOUT:
         peerTimeoutSec = static_cast<uint32_t>(strtoul(optarg, NULL, 10));
+        break;
+      case OPT_BUFFER_FRAMES:
+        bufferFrames = static_cast<size_t>(strtoul(optarg, NULL, 10));
+        break;
+      case OPT_BUFFER_MAX:
+        bufferMax = static_cast<size_t>(strtoul(optarg, NULL, 10));
         break;
       case 'C':
         switch (optarg[0]) {
@@ -468,6 +483,16 @@ int main(int argc, char **argv) {
     printUsage();
     return -1;
   }
+  /* A hard cap below the preallocation would over-allocate at startup and then
+   * refuse to grow (resizePool ignores the cap on the initial reservation), so
+   * reject the inconsistent combination up front. A cap of 0 means unlimited. */
+  if (bufferMax != 0 && bufferFrames > bufferMax) {
+    std::cout << "Usage Error: " << std::endl
+              << "--buffer-frames must not exceed --buffer-max (0 = unlimited)" << std::endl
+              << std::endl;
+    printUsage();
+    return -1;
+  }
   if (linkMtuSize < MIN_LINK_MTU_SIZE) {
     std::cout << "Usage Error: " << std::endl
               << "Specify a link mtu size greater than " << MIN_LINK_MTU_SIZE << std::endl
@@ -581,7 +606,7 @@ int main(int argc, char **argv) {
    * joined below before main returns.
    */
   auto canThread = std::make_unique<CANThread>(debugOptions, canInterfaceName);
-  auto canFrameBuffer = std::make_unique<FrameBuffer>(1000,16000);
+  auto canFrameBuffer = std::make_unique<FrameBuffer>(bufferFrames, bufferMax);
   canThread->setFrameBuffer(canFrameBuffer.get());
 
   PeerRegistry registry;
@@ -606,6 +631,7 @@ int main(int argc, char **argv) {
         .checkPeer = checkPeer
       });
     serverThread->setRegistry(&registry, maxPeers);
+    serverThread->setEgressPoolSize(bufferFrames, bufferMax);
     netThread = std::move(serverThread);
   } else if (useTCP && tcpRole == TCP_CLIENT) {
     netThread = std::make_unique<TCPClientThread>(debugOptions, TCPThreadParams {
@@ -667,9 +693,11 @@ int main(int argc, char **argv) {
       udpPeerAddrs.push_back(remoteAddr);
     }
 
+    udpThread->setEgressPoolSize(bufferFrames, bufferMax);
+
     PeerId nextId = FIRST_NET_PEER_ID;
     for (const struct sockaddr_storage &addr : udpPeerAddrs) {
-      auto egress = std::make_unique<FrameBuffer>(1000,16000);
+      auto egress = std::make_unique<FrameBuffer>(bufferFrames, bufferMax);
       udpThread->addPeer(nextId, addr, egress.get());
       registry.add(Peer{ nextId, udpThread.get(), egress.get() });
       netFrameBuffers.push_back(std::move(egress));
@@ -694,7 +722,7 @@ int main(int argc, char **argv) {
    */
   bool tcpServerHub = useTCP && tcpRole == TCP_SERVER;
   if (netFrameBuffers.empty() && (useTCP || useSCTP) && !tcpServerHub) {
-    auto egress = std::make_unique<FrameBuffer>(1000,16000);
+    auto egress = std::make_unique<FrameBuffer>(bufferFrames, bufferMax);
     netThread->setFrameBuffer(egress.get());
     registry.add(Peer{ FIRST_NET_PEER_ID, netThread.get(), egress.get() });
     netFrameBuffers.push_back(std::move(egress));

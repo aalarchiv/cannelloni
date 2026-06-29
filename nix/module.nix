@@ -58,6 +58,25 @@ in
         Only used with discover = true.
       '';
     };
+    bufferFrames = mkOption {
+      type = types.nullOr types.int;
+      default = null;
+      description = ''
+        Per-participant egress FrameBuffer pool: number of CAN frames
+        preallocated up front (cannelloni --buffer-frames). null leaves the
+        cannelloni default (1000). Lower it on a many-peer hub to cut the
+        baseline RAM, which scales as (peers + 1) x this.
+      '';
+    };
+    bufferMax = mkOption {
+      type = types.nullOr types.int;
+      default = null;
+      description = ''
+        Per-participant egress FrameBuffer pool: hard cap on frames the pool may
+        grow to (cannelloni --buffer-max, 0 = unlimited). null leaves the
+        cannelloni default (16000). Bounds the worst-case RAM of a many-peer hub.
+      '';
+    };
     remotePort = mkOption {
       type = types.int;
       default = 10000;
@@ -112,6 +131,12 @@ in
         else "-p";
       discoverArgs = lib.optionalString cfg.discover
         "--discover --max-peers ${builtins.toString cfg.maxPeers} --peer-timeout ${builtins.toString cfg.peerTimeout}";
+      # Egress pool sizing: emit only when overridden so the default command line
+      # (and every existing test) is left byte-for-byte unchanged.
+      bufferArgs = lib.concatStringsSep " " (
+        lib.optional (cfg.bufferFrames != null) "--buffer-frames ${builtins.toString cfg.bufferFrames}"
+        ++ lib.optional (cfg.bufferMax != null) "--buffer-max ${builtins.toString cfg.bufferMax}"
+      );
       extraArgs = lib.concatStringsSep " " cfg.extraArgs;
     in {
       description = "cannelloni";
@@ -119,7 +144,7 @@ in
       wantedBy = [ "multi-user.target" ];
 
       serviceConfig = {
-        ExecStart = "${pkgs.cannelloni}/bin/cannelloni ${transportAndMode} -I ${cfg.canInterface} -l ${builtins.toString cfg.localPort} -L ${cfg.localAddress} -r ${builtins.toString cfg.remotePort} ${remoteAddress} ${peerArgs} ${discoverArgs} ${extraArgs}";
+        ExecStart = "${pkgs.cannelloni}/bin/cannelloni ${transportAndMode} -I ${cfg.canInterface} -l ${builtins.toString cfg.localPort} -L ${cfg.localAddress} -r ${builtins.toString cfg.remotePort} ${remoteAddress} ${peerArgs} ${discoverArgs} ${bufferArgs} ${extraArgs}";
         User="cannelloni";
         DynamicUser=true;
        };

@@ -79,6 +79,11 @@ void TCPServerThread::setRegistry(PeerRegistry *registry, size_t maxPeers) {
   m_maxPeers = maxPeers;
 }
 
+void TCPServerThread::setEgressPoolSize(size_t frames, size_t max) {
+  m_egressPoolFrames = frames;
+  m_egressPoolMax = max;
+}
+
 int TCPServerThread::start() {
   m_serverSocket = socket(m_addressFamily, SOCK_STREAM, 0);
   if (m_serverSocket < 0) {
@@ -321,7 +326,8 @@ void TCPServerThread::acceptClients() {
     }
 
     PeerId id = m_nextPeerId++;
-    auto peer = std::make_unique<TcpPeer>(id, fd, connAddr);
+    auto peer = std::make_unique<TcpPeer>(id, fd, connAddr,
+                                          m_egressPoolFrames, m_egressPoolMax);
     TcpPeer *raw = peer.get();
     m_fdIndex[fd] = raw;
     m_peers.push_back(std::move(peer));

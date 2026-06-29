@@ -240,10 +240,14 @@ Notes and limits:
 - A single `-R`/`-r` invocation is unchanged and byte-for-byte identical to
   before — `--peer` is purely additive.
 - The hub preserves **per-link** order, not a single global bus order; use `-s`
-  to sort each flushed batch by CAN id.
+  to sort each flushed batch by CAN id. Buffering adds latency and jitter versus
+  a real wire — see [Tuning](#tuning) for a low-latency configuration.
 - The aggregate CAN bitrate is the hard ceiling for peers→CAN traffic; under
   sustained overload frames are dropped oldest-first at egress (the path
   recovers once the backlog drains) and no peer can stall the others.
+- Each peer owns an egress pool, so a many-peer hub's RAM scales with the peer
+  count; size it with `--buffer-frames`/`--buffer-max` (see
+  [Buffer memory](#buffer-memory)).
 - Hub-to-hub topologies (a peer that is itself a hub) can form multi-hop loops
   and are out of scope; keep the topology a star of single-peer leaves around
   one hub.
@@ -322,6 +326,71 @@ ordering is preserved **per-link**, not globally; the CAN bitrate is the hard
 ceiling for hub→CAN traffic; and the port must be kept on a trusted network
 (there is no peer authentication). Hub-to-hub topologies are out of scope —
 keep a star of single-peer leaves around one hub.
+
+Each accepted client owns an egress pool sized by `--buffer-frames`/
+`--buffer-max`, so the hub's RAM scales with the number of connected clients
+(see [Buffer memory](#buffer-memory)). TCP writes every frame immediately, so
+the buffer timeout and frame sorting do not apply.
+
+# Tuning
+
+## Latency and jitter
+
+A cannelloni link is **not** a CAN wire and does not behave like one with
+respect to timing. On UDP and SCTP frames are buffered and flushed either when
+the buffer timeout (`-t`, default 100000 us = 100 ms) is reached or when a
+datagram fills, so a frame can wait up to the timeout before it leaves. The
+worst-case one-way latency is roughly
+
+```
+Lw ~= buffer timeout (-t) + network latency + delay on the receiver
+```
+
+Because each peer is served by its own timer and buffer, a hub preserves
+**per-link** order, not a single global bus order, and different peers can
+observe the same frame with different delays — i.e. there is jitter that a real
+shared bus does not have. TCP is different: it has no buffer timeout and writes
+every frame immediately (frame sorting and `-t` do not apply), trading datagram
+aggregation for lower per-frame latency.
+
+For a **low-latency configuration**:
+
+- Lower the buffer timeout, e.g. `-t 1000` (1 ms), so frames flush almost
+  immediately. This raises the packet rate and CPU cost and reduces
+  aggregation, so balance it against your bandwidth.
+- Or give only the latency-sensitive CAN ids a short timeout with a per-id
+  timeout table (`-T table.csv`, see [Timeouts](#timeouts)) and leave the rest
+  batched.
+- Or use TCP, which sends each frame as soon as it is read (at the cost of one
+  TCP segment per frame under load).
+
+These are *latency* tunables; they do not change the fact that delivery is
+best-effort (see the usage notice) and that the aggregate CAN bitrate is the
+hard ceiling for traffic written to a CAN bus.
+
+## Buffer memory
+
+Every participant on the virtual bus — the local CAN bus and **each** network
+peer — owns its own egress frame pool, so a hub's worst-case frame memory grows
+with the peer count:
+
+```
+worst-case frame memory ~= (peers + 1) x (--buffer-max) x sizeof(canfd_frame)
+```
+
+Two options size every pool (CAN, static peers, discovered UDP peers and
+accepted TCP clients alike):
+
+- `--buffer-frames N` (default 1000): frames preallocated up front per pool.
+  This is the baseline committed memory; lower it on a many-peer hub.
+- `--buffer-max N` (default 16000, `0` = unlimited): the hard cap a pool may
+  grow to. This is also the depth of the drop-oldest ring under overload — a
+  smaller cap drops frames sooner but bounds RAM; a larger cap absorbs longer
+  bursts at higher peak RAM. `--buffer-frames` must not exceed `--buffer-max`.
+
+For example, a 16-peer hub that only needs to absorb short bursts might run
+`--buffer-frames 100 --buffer-max 2000` to keep both baseline and worst-case
+memory an order of magnitude below the defaults.
 
 # Frame sorting
 

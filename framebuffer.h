@@ -20,11 +20,25 @@
 
 #pragma once
 
+#include <cstddef>
 #include <list>
 #include <mutex>
 #include "cannelloni.h"
 
 namespace cannelloni {
+
+/*
+ * Default per-participant egress FrameBuffer pool sizing, overridable from the
+ * command line (--buffer-frames / --buffer-max). `frames` are pre-allocated up
+ * front; the pool may then grow up to `max` frames (a hard memory bound; 0 =
+ * grow without limit) before the oldest queued frame is overwritten. Every
+ * participant (the local CAN bus and each network peer) owns one such buffer,
+ * so the worst-case frame memory of a hub scales as roughly
+ * (peers + 1) * max * sizeof(canfd_frame); lowering these bounds the RAM of a
+ * many-peer hub (see cannelloni-84a.5).
+ */
+static const std::size_t DEFAULT_BUFFER_FRAMES = 1000;
+static const std::size_t DEFAULT_BUFFER_MAX    = 16000;
 
 /* Design Notes:
  *
