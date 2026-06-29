@@ -45,6 +45,24 @@
 
 using namespace cannelloni;
 
+/*
+ * Per-peer TX backpressure bounds (Phase 4b, cannelloni-84a.4.2). A peer that
+ * stops reading must neither grow the hub's memory without limit nor stall the
+ * shared net thread or the other peers. Writes are already non-blocking, so a
+ * slow peer only ever parks bytes in its own txPending queue; these caps bound
+ * that queue:
+ *
+ *   - At SOFT we stop feeding the peer new frames. They stay in its egress ring
+ *     buffer, which drops the oldest under overload -- the standard cannelloni
+ *     overload policy -- so a momentarily slow peer loses stale frames, not the
+ *     hub's memory, and catches up once it drains.
+ *   - At HARD the peer has not drained even the bytes already committed to its
+ *     stream; it is a hopeless laggard and is disconnected. A disconnected peer
+ *     can reconnect, whereas a corrupted stream cannot be partially dropped.
+ */
+static const size_t TX_BACKLOG_SOFT_BYTES = 256 * 1024;
+static const size_t TX_BACKLOG_HARD_BYTES = 1024 * 1024;
+
 TCPServerThread::TCPServerThread(const struct debugOptions_t &debugOptions,
                                  const struct TCPServerThreadParams &params)
   : TCPThread(debugOptions, params.toTCPThreadParams())
@@ -477,6 +495,15 @@ void TCPServerThread::flushPeer(TcpPeer &peer) {
   if (peer.connectState != NEGOTIATED)
     return;
 
+  /*
+   * Backpressure: if this peer is already sitting on a large unsent backlog it
+   * is not keeping up, so stop moving more frames out of its egress ring. The
+   * ring then drops its oldest frames under continued overload (drop-oldest),
+   * which bounds memory and isolates the slow peer without touching the others.
+   */
+  if (peer.txPending.size() - peer.txSent >= TX_BACKLOG_SOFT_BYTES)
+    return;
+
   /* Move every queued egress frame into the peer's outbound byte stream. */
   uint8_t enc[MAX_TRANSMIT_BUFFER_SIZE_BYTES];
   peer.egress->swapBuffers();
@@ -522,6 +549,17 @@ bool TCPServerThread::drainPending(TcpPeer &peer) {
     if (!peer.epollOut) {
       epollMod(peer.fd, EPOLLIN | EPOLLOUT);
       peer.epollOut = true;
+    }
+    /*
+     * Still backed up after a full send attempt: if the parked backlog has
+     * grown past the hard cap the peer is a hopeless laggard (its receive
+     * window has been stuck long enough that even SOFT-gated egress could not
+     * keep it bounded). Drop it so it stops consuming memory; it may reconnect.
+     */
+    if (peer.txPending.size() - peer.txSent >= TX_BACKLOG_HARD_BYTES) {
+      lwarn << "Participant " << peer.id << " TX backlog exceeds "
+            << TX_BACKLOG_HARD_BYTES << " bytes; dropping laggard" << std::endl;
+      return false;
     }
   }
   return true;
