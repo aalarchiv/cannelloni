@@ -148,7 +148,7 @@ peers at once, forming a virtual shared bus, with optional mDNS/zeroconf peer \
 discovery.")
 set(CPACK_DEBIAN_PACKAGE_SECTION "net")
 set(CPACK_DEBIAN_PACKAGE_PRIORITY "optional")
-set(CPACK_DEBIAN_PACKAGE_HOMEPAGE "https://github.com/aalarchiv/cannelloni")
+set(CPACK_DEBIAN_PACKAGE_HOMEPAGE "https://github.com/aalarchiv/cannellonis")
 set(CPACK_DEBIAN_PACKAGE_BREAKS "cannelloni")
 set(CPACK_DEBIAN_PACKAGE_REPLACES "cannelloni")
 # Auto-compute Depends (libc6, libsctp1, libavahi-client3 ...) from the linked
