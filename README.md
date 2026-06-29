@@ -90,6 +90,27 @@ Just install it using
   cmake --install build
 ```
 
+### Debian package
+
+To build a `.deb`, run CPack against a configured build tree:
+
+```
+cmake -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build
+cpack -G DEB --config build/CPackConfig.cmake
+```
+
+This produces `build/cannellonis_<version>_<arch>.deb` containing just the
+`cannellonis` binary and docs (the `cannelloni-common` shared library is
+intentionally left out — the binary static-links it). Runtime dependencies
+(`libsctp1`, `libavahi-client3`, …) are detected automatically, so build on a
+host that has those optional libraries installed if you want SCTP and mDNS
+support in the package.
+
+The package declares `Breaks`/`Replaces: cannelloni`, so installing it cleanly
+supersedes an upstream `cannelloni` package rather than running two CAN tunnels
+side by side.
+
 ## Usage
 
 ### Example
