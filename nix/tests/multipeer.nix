@@ -12,6 +12,9 @@
 #
 # Acceptance: every node receives every OTHER node's frames and NEVER its own;
 # the hub survives an overload from one peer and keeps serving the others.
+let
+  frameCompare = ../../tests/frame_compare.py;
+in
 testers.nixosTest {
   name = "multipeer";
 
@@ -63,7 +66,12 @@ testers.nixosTest {
     };
 
   testScript = ''
+    import subprocess
+    import sys
+    import tempfile
+
     nodes = {"node_hub": node_hub, "node_a": node_a, "node_b": node_b, "node_c": node_c}
+    frame_compare = "${frameCompare}"
 
     def cap_start(node):
         node.execute("pkill -x candump 2>/dev/null; true")
@@ -81,6 +89,25 @@ testers.nixosTest {
             return int(out.strip())
         except ValueError:
             return 0
+
+    def cap_read(node):
+        return node.succeed("cat /tmp/cap.log")
+
+    def write_tmp(text):
+        f = tempfile.NamedTemporaryFile("w", suffix=".log", delete=False)
+        f.write(text)
+        f.close()
+        return f.name
+
+    # Byte-level comparison via frame_compare.py: every candump -L frame token
+    # is checked verbatim (FD/RTR/EFF flags and all), not substring-grepped.
+    def compare(mode, left_text, right_text, msg):
+        res = subprocess.run(
+            [sys.executable, frame_compare, mode,
+             write_tmp(left_text), write_tmp(right_text)],
+            capture_output=True, text=True)
+        print("[%s] %s\n%s%s" % (mode, msg, res.stdout, res.stderr))
+        assert res.returncode == 0, "frame_compare %s failed (%s)" % (mode, msg)
 
     # Send `frame` from `src`; assert it reaches every node in `expect` and
     # appears exactly once on `src`'s own bus (the original cansend, never an
@@ -117,6 +144,25 @@ testers.nixosTest {
     fanout("node_c", "3C3##1DEADBEEFCAFEBABE0011223344",
            ["node_hub", "node_a", "node_b"],
            needle="DEADBEEFCAFEBABE0011223344")
+
+    # --- Byte-level fan-out of a whole batch (not a one-frame substring) ----
+    # node_a sends ten distinct frames; every other participant must receive
+    # the batch byte-for-byte (subset: all present, no global order promised),
+    # and node_a's own bus must show exactly that batch once each -- a verbatim
+    # check that origin-exclusion neither drops nor echoes any frame.
+    batch = ["%s#%02X%02X" % (cid, i, (i * 7) % 256) for i, cid in enumerate(
+        ["3FF", "010", "280", "0C0", "7A1", "155", "020", "6FE", "400", "088"])]
+    expected = "".join("(0) x %s\n" % f for f in batch)
+    cap_all()
+    node_a.succeed("; ".join("cansend vcan0 %s" % f for f in batch))
+    node_a.sleep(3)
+    for n in nodes.values():
+        n.execute("pkill -x candump")
+    for name in ["node_hub", "node_b", "node_c"]:
+        compare("subset", expected, cap_read(nodes[name]),
+                "%s receives node_a's batch verbatim" % name)
+    compare("multiset", expected, cap_read(node_a),
+            "node_a's own bus shows its batch once each (no echo)")
 
     # --- Overload: one peer floods; hub + all peers must survive ----------
     node_a.succeed("cangen vcan0 -g 0 -I i -D r -L 8 -n 5000")

@@ -55,6 +55,7 @@
         multipeer = nixpkgsFor.${system}.callPackage ./nix/tests/multipeer.nix { };
         tcp_multipeer = nixpkgsFor.${system}.callPackage ./nix/tests/tcp_multipeer.nix { };
         discovery = nixpkgsFor.${system}.callPackage ./nix/tests/discovery.nix { };
+        ingress = nixpkgsFor.${system}.callPackage ./nix/tests/ingress.nix { };
         characterization = nixpkgsFor.${system}.callPackage ./nix/tests/characterization.nix { };
         characterization_sort = nixpkgsFor.${system}.callPackage ./nix/tests/characterization_sort.nix { };
       });
