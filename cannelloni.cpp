@@ -86,7 +86,7 @@ void printUsage() {
   std::cout << "\t --peer HOST[:PORT] \t add a UDP hub peer (repeatable); PORT defaults to -r" << std::endl;
   std::cout << "\t --peers-file FILE \t read UDP hub peers from FILE (one HOST[:PORT] per line)" << std::endl;
   std::cout << "\t --discover \t\t learn UDP peers at runtime from valid traffic (hub, off by default)" << std::endl;
-  std::cout << "\t --max-peers N \t\t cap on dynamically discovered peers, default: 16" << std::endl;
+  std::cout << "\t --max-peers N \t\t cap on discovered UDP peers / accepted TCP server clients, default: 16" << std::endl;
   std::cout << "\t --peer-timeout SEC \t evict a discovered peer after SEC seconds of silence (0=never), default: 30" << std::endl;
   std::cout << "\t -I INTERFACE \t\t can interface, default: vcan0" << std::endl;
   std::cout << "\t -t timeout \t\t buffer timeout for can messages (us), default: 100000" << std::endl;

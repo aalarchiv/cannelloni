@@ -44,7 +44,11 @@ in
     maxPeers = mkOption {
       type = types.int;
       default = 16;
-      description = "Cap on dynamically discovered peers (only used with discover = true).";
+      description = ''
+        Cap on dynamically discovered UDP peers (with discover = true) or
+        simultaneously accepted TCP server clients. Matches the cannelloni
+        --max-peers default of 16 when left unset.
+      '';
     };
     peerTimeout = mkOption {
       type = types.int;

@@ -291,6 +291,38 @@ cannelloni -I vcan0 -C c -R 192.168.0.2
 With TCP, no frame buffer is used an frames are immediately transmitted,
 frame sorting and timeouts do not apply here.
 
+### TCP multi-peer hub
+
+A TCP **server** is a hub: it accepts and tracks **many** clients at once, so
+the server's CAN bus and every connected client's CAN bus form one virtual
+shared bus. A frame ingested from any participant is delivered to every other
+participant (origin-exclusion), exactly like the UDP hub above. A single
+client behaves identically to the previous one-to-one server, so existing
+setups are unchanged.
+
+```
+# hub: one server, any number of TCP clients dial in
+cannelloni -I vcan0 -C s -l 20000 -p
+
+# each leaf is an ordinary TCP client pointing at the hub
+cannelloni -I vcan0 -C c -R <hub> -r 20000
+```
+
+The clients are learnt on connect and dropped on disconnect; a new client can
+connect or an existing one can drop without disrupting the others. Use `-p`
+(no peer check) so the server accepts every client rather than a single
+configured `-R` remote, and `--max-peers N` (default 16) to cap the number of
+simultaneous clients.
+
+Each client gets its own per-peer egress with **non-blocking** writes, so a
+slow or stalled client can never stall the hub or the other clients: its
+backlog is bounded and the oldest frames are dropped under overload (a
+hopelessly stuck client is disconnected and may reconnect). Like the UDP hub,
+ordering is preserved **per-link**, not globally; the CAN bitrate is the hard
+ceiling for hub→CAN traffic; and the port must be kept on a trusted network
+(there is no peer authentication). Hub-to-hub topologies are out of scope —
+keep a star of single-peer leaves around one hub.
+
 # Frame sorting
 
 CAN frames can be sorted by their ID in each ethernet frame to write
