@@ -160,7 +160,11 @@ in
       extraArgs = lib.concatStringsSep " " cfg.extraArgs;
     in {
       description = "cannelloni";
-      after = [ "network.target" ];
+      # With mDNS, order after avahi-daemon (Type=dbus) so its bus name is ready
+      # before cannelloni's Avahi client starts -- avoids losing the boot race
+      # where avahi_client_new hits a transient D-Bus error.
+      after = [ "network.target" ] ++ lib.optional cfg.mdns "avahi-daemon.service";
+      wants = lib.optional cfg.mdns "avahi-daemon.service";
       wantedBy = [ "multi-user.target" ];
 
       serviceConfig = {

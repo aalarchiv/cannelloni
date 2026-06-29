@@ -118,8 +118,14 @@ class UDPThread : public ConnectionThread {
      * registry is mutated from the net thread, so it must be the same instance
      * the Router reads (its shared_mutex serialises the two). Call before
      * start().
+     *
+     * learnFromData gates the PROMISCUOUS traffic-learning of unknown senders
+     * (true for --discover). The mDNS backend passes false: it adds peers only
+     * via queueDiscoveredPeer() from name-self-filtered service resolution, but
+     * still wants the dynamic-peer registry + liveness sweep this enables.
      */
-    void enableDiscovery(PeerRegistry *registry, size_t maxPeers, uint32_t peerTimeoutSec);
+    void enableDiscovery(PeerRegistry *registry, size_t maxPeers, uint32_t peerTimeoutSec,
+                         bool learnFromData);
 
     /*
      * Hand a peer address learnt by an external discovery backend (mDNS/Avahi,
@@ -209,6 +215,10 @@ class UDPThread : public ConnectionThread {
      */
     PeerRegistry *m_registry = nullptr;
     bool m_discover = false;
+    /* Promiscuous traffic-learning of unknown senders (--discover). Off for the
+     * mDNS backend, which adds peers only via resolved + self-filtered services
+     * while still using the dynamic-peer registry + liveness sweep (m_discover). */
+    bool m_learnFromData = false;
     size_t m_maxPeers = 0;
     uint64_t m_peerTimeoutNs = 0;
     PeerId m_nextPeerId = FIRST_NET_PEER_ID;

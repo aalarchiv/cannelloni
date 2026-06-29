@@ -249,9 +249,11 @@ void UDPThread::addPeer(PeerId id, const struct sockaddr_storage &remoteAddr, Fr
     m_nextPeerId = id + 1;
 }
 
-void UDPThread::enableDiscovery(PeerRegistry *registry, size_t maxPeers, uint32_t peerTimeoutSec) {
+void UDPThread::enableDiscovery(PeerRegistry *registry, size_t maxPeers, uint32_t peerTimeoutSec,
+                                bool learnFromData) {
   m_registry = registry;
   m_discover = true;
+  m_learnFromData = learnFromData;
   m_maxPeers = maxPeers;
   m_peerTimeoutNs = static_cast<uint64_t>(peerTimeoutSec) * 1000000000ull;
 }
@@ -275,6 +277,21 @@ static bool sameSockaddr(const struct sockaddr_storage &a, const struct sockaddr
     const struct sockaddr_in6 *y = (const struct sockaddr_in6 *)&b;
     return x->sin6_port == y->sin6_port &&
            memcmp(&x->sin6_addr, &y->sin6_addr, sizeof(struct in6_addr)) == 0;
+  }
+  return false;
+}
+
+/* A loopback address (127.0.0.0/8 or ::1) is this host talking to itself. A hub
+ * must never adopt one as a peer: doing so launders a frame's origin back
+ * through the local instance and defeats origin-exclusion, producing an
+ * amplifying CAN loop between mutually-peered hubs. */
+static bool isLoopbackAddr(const struct sockaddr_storage *a) {
+  if (a->ss_family == AF_INET) {
+    const struct sockaddr_in *s = (const struct sockaddr_in *)a;
+    return (ntohl(s->sin_addr.s_addr) >> 24) == 127;
+  } else if (a->ss_family == AF_INET6) {
+    const struct sockaddr_in6 *s = (const struct sockaddr_in6 *)a;
+    return IN6_IS_ADDR_LOOPBACK(&s->sin6_addr);
   }
   return false;
 }
@@ -312,6 +329,15 @@ UdpPeer *UDPThread::resolveOrigin(const struct sockaddr_storage *clientAddr) {
 }
 
 UdpPeer *UDPThread::learnPeer(const struct sockaddr_storage *clientAddr) {
+  /* Never peer with ourselves over loopback (see isLoopbackAddr): it would
+   * create an origin-laundering CAN loop. mDNS already self-filters by service
+   * name, but a stray loopback datagram must not slip through here either. */
+  if (isLoopbackAddr(clientAddr)) {
+    lwarn << "Discovery: ignoring loopback address "
+          << formatSocketAddress(getSocketAddress(clientAddr))
+          << " (a hub never peers with itself)" << std::endl;
+    return nullptr;
+  }
   if (m_maxPeers != 0 && m_dynamicCount >= m_maxPeers) {
     lwarn << "Discovery: dynamic peer limit (" << m_maxPeers << ") reached, dropping datagram from "
           << formatSocketAddress(getSocketAddress(clientAddr)) << std::endl;
@@ -426,9 +452,12 @@ void UDPThread::handleDatagram(uint8_t *buffer, uint16_t len, struct sockaddr_st
    * Discovery (Phase 3): an unknown source carrying a well-formed cannelloni
    * packet is learnt as a new dynamic peer, so real devices dial into the hub
    * without static config. Learning only on valid RX keeps a stray datagram
-   * from spending a peer slot; the cap bounds it further.
+   * from spending a peer slot; the cap bounds it further. This promiscuous
+   * traffic-learning is gated on --discover (m_learnFromData): the mDNS backend
+   * adds peers only from name-self-filtered service resolution, so it does NOT
+   * learn arbitrary (incl. its own loopback) senders here.
    */
-  if (peer == nullptr && m_discover && isCannelloniData(buffer, len))
+  if (peer == nullptr && m_learnFromData && isCannelloniData(buffer, len))
     peer = learnPeer(clientAddr);
   if (peer == nullptr) {
     lwarn << "Got a datagram from " << formatSocketAddress(getSocketAddress(clientAddr))

@@ -23,6 +23,7 @@
 #ifdef AVAHI_SUPPORT
 
 #include <cstring>
+#include <ctime>
 #include <string>
 
 #include <arpa/inet.h>
@@ -92,11 +93,24 @@ class MdnsDiscovery::Impl {
         lerror << "mDNS: failed to create Avahi poll" << std::endl;
         return false;
       }
+      /*
+       * NO_FAIL tolerates the avahi DAEMON being absent/restarting once the
+       * client exists (it reconnects and our callbacks re-publish + re-browse).
+       * It does NOT cover the D-Bus system bus or the daemon's bus name not yet
+       * being ready at startup: avahi_client_new then fails outright with a
+       * D-Bus error. That is a real startup race (cannelloni racing avahi-daemon
+       * at boot), so retry briefly before giving up rather than silently running
+       * without discovery for the rest of the process's life.
+       */
       int error = 0;
-      /* NO_FAIL: tolerate the daemon being absent/restarting -- the client
-       * reconnects and our callbacks re-publish + re-browse when it returns. */
-      m_client = avahi_client_new(avahi_threaded_poll_get(m_poll), AVAHI_CLIENT_NO_FAIL,
-                                  clientCallback, this, &error);
+      for (int attempt = 0; attempt < 30; ++attempt) {
+        m_client = avahi_client_new(avahi_threaded_poll_get(m_poll), AVAHI_CLIENT_NO_FAIL,
+                                    clientCallback, this, &error);
+        if (m_client != nullptr)
+          break;
+        struct timespec delay = { 0, 500 * 1000 * 1000 }; /* 500 ms */
+        nanosleep(&delay, nullptr);
+      }
       if (m_client == nullptr) {
         lerror << "mDNS: failed to create Avahi client: " << avahi_strerror(error) << std::endl;
         avahi_threaded_poll_free(m_poll);

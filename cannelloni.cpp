@@ -740,7 +740,9 @@ int main(int argc, char **argv) {
      * a discovered peer ages out / re-learns by traffic exactly like Phase 3.
      */
     if (discover || useMdns)
-      udpThread->enableDiscovery(&registry, maxPeers, peerTimeoutSec);
+      /* learnFromData only for --discover: mDNS adds peers via resolved,
+       * self-filtered services, never by adopting arbitrary senders. */
+      udpThread->enableDiscovery(&registry, maxPeers, peerTimeoutSec, /*learnFromData=*/discover);
 #ifdef AVAHI_SUPPORT
     if (useMdns)
       mdnsTarget = udpThread.get();
