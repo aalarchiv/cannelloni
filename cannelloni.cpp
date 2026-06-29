@@ -592,12 +592,21 @@ int main(int argc, char **argv) {
 
   std::unique_ptr<ConnectionThread> netThread;
   if (useTCP && tcpRole == TCP_SERVER) {
-    netThread = std::make_unique<TCPServerThread>(debugOptions, TCPServerThreadParams {
+    /*
+     * The TCP server is a hub: it accepts and tracks many clients, each a
+     * participant on the virtual shared bus, learnt on accept and evicted on
+     * disconnect. It therefore starts with no static net peer (unlike the TCP
+     * client / SCTP fallback below) and mutates the same registry the Router
+     * reads. --max-peers caps the number of simultaneous clients.
+     */
+    auto serverThread = std::make_unique<TCPServerThread>(debugOptions, TCPServerThreadParams {
         .remoteAddr = remoteAddr,
         .localAddr = localAddr,
         .addressFamily = addressFamily,
         .checkPeer = checkPeer
       });
+    serverThread->setRegistry(&registry, maxPeers);
+    netThread = std::move(serverThread);
   } else if (useTCP && tcpRole == TCP_CLIENT) {
     netThread = std::make_unique<TCPClientThread>(debugOptions, TCPThreadParams {
         .remoteAddr = remoteAddr,
@@ -678,11 +687,13 @@ int main(int argc, char **argv) {
   }
 
   /*
-   * TCP/SCTP serve a single peer in this phase: one egress buffer. (A UDP
-   * discovery hub legitimately starts with no peers, so this fallback is gated
-   * on the single-peer transports, not merely on an empty buffer list.)
+   * The TCP client and SCTP serve a single peer: one static egress buffer. (A
+   * UDP discovery hub and the TCP server hub legitimately start with no peers
+   * and learn them at runtime, so this fallback is gated on the single-peer
+   * transports, not merely on an empty buffer list.)
    */
-  if (netFrameBuffers.empty() && (useTCP || useSCTP)) {
+  bool tcpServerHub = useTCP && tcpRole == TCP_SERVER;
+  if (netFrameBuffers.empty() && (useTCP || useSCTP) && !tcpServerHub) {
     auto egress = std::make_unique<FrameBuffer>(1000,16000);
     netThread->setFrameBuffer(egress.get());
     registry.add(Peer{ FIRST_NET_PEER_ID, netThread.get(), egress.get() });
