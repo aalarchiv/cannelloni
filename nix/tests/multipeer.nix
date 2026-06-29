@@ -2,7 +2,7 @@
 # Phase 2 acceptance test (cannelloni-84a.2): a UDP multi-peer hub.
 #
 # Topology is a star (hub-to-hub multi-hop loops are out of v1 scope): one hub
-# node with three UDP peer leaves. The leaves are stock single-peer cannelloni
+# node with three UDP peer leaves. The leaves are stock single-peer cannellonis
 # instances pointing back at the hub, so the virtual shared bus has four
 # participants: the hub's CAN bus and each leaf's CAN bus.
 #
@@ -29,7 +29,7 @@ testers.nixosTest {
           ];
           networking.firewall.enable = false;
           services.setup_can.mtu = 72; # CANFD_MTU -> CAN-FD negotiated
-          services.cannelloni = {
+          services.cannellonis = {
             enable = true;
             transport = "udp";
             ipProtocol = "ipv4";
@@ -50,7 +50,7 @@ testers.nixosTest {
           ];
           networking.firewall.enable = false;
           services.setup_can.mtu = 72; # CANFD_MTU -> CAN-FD negotiated
-          services.cannelloni = {
+          services.cannellonis = {
             enable = true;
             transport = "udp";
             ipProtocol = "ipv4";
@@ -129,7 +129,7 @@ testers.nixosTest {
 
     start_all()
     for n in nodes.values():
-        n.wait_for_unit("cannelloni")
+        n.wait_for_unit("cannellonis")
     for n in nodes.values():
         n.wait_until_succeeds("journalctl | grep 'UDPThread up and running'")
         n.wait_until_succeeds("journalctl | grep 'CANThread up and running'")
@@ -167,7 +167,7 @@ testers.nixosTest {
     # --- Overload: one peer floods; hub + all peers must survive ----------
     node_a.succeed("cangen vcan0 -g 0 -I i -D r -L 8 -n 5000")
     for n in nodes.values():
-        n.succeed("systemctl is-active cannelloni")
+        n.succeed("systemctl is-active cannellonis")
     # Recovery: once the backlog drains a fresh frame still reaches the peers.
     cap_start(node_c)
     node_a.succeed("cansend vcan0 7AA#CAFEBABE")
@@ -175,11 +175,11 @@ testers.nixosTest {
     node_c.execute("pkill -x candump")
 
     # --- Dead peer: kill one leaf, the hub keeps serving the rest ---------
-    node_c.succeed("systemctl stop cannelloni")
+    node_c.succeed("systemctl stop cannellonis")
     cap_start(node_b)
     node_a.succeed("cansend vcan0 555#DDDDDDDD")
     node_b.wait_until_succeeds("grep -q '555#DDDDDDDD' /tmp/cap.log")
-    node_hub.succeed("systemctl is-active cannelloni")
+    node_hub.succeed("systemctl is-active cannellonis")
     node_b.execute("pkill -x candump")
   '';
 }

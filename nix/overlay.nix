@@ -1,3 +1,3 @@
 final: prev: {
-      cannelloni = final.callPackage ./package.nix {};
+      cannellonis = final.callPackage ./package.nix {};
 }

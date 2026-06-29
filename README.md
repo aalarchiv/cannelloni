@@ -1,9 +1,15 @@
-# cannelloni
+# cannellonis
 *a SocketCAN over Ethernet tunnel*
+
+> **cannellonis** is a multi-peer fork of [cannelloni](https://github.com/mguentner/cannelloni):
+> a single instance can bridge a CAN bus to **many** peers at once, forming a
+> virtual shared bus. The binary was renamed `cannelloni` → `cannellonis` (plural)
+> to denote this hub capability. The on-wire protocol and the `cannelloni-common`
+> library are unchanged and remain interoperable with upstream cannelloni.
 
 [![Chat on Matrix](https://matrix.to/img/matrix-badge.svg)](https://matrix.to/#/#cannelloni:matrix.org)
 
-cannelloni is written in C++11 and uses UDP, TCP or SCTP to transfer CAN frames
+cannellonis is written in C++11 and uses UDP, TCP or SCTP to transfer CAN frames
 between two machines.
 
 Features:
@@ -21,12 +27,12 @@ Features:
 - SCTP support (optional, reliable transport)
 
 # Important Usage Notice
-cannelloni is **not suited** for production deployments. Use it only in environments where packet loss is tolerable.
+cannellonis is **not suited** for production deployments. Use it only in environments where packet loss is tolerable.
 There is **no guarantee** that CAN frames will reach their destination at all **and/or** in the right order.
 
 # Trust model
 
-cannelloni is designed for **internal, trusted networks**. Its threat model
+cannellonis is designed for **internal, trusted networks**. Its threat model
 deliberately **excludes external attackers**: there is **no authentication and
 no encryption** between peers, consistent with upstream cannelloni. Any host
 that can reach the transport port can both read every CAN frame on the bus and
@@ -35,7 +41,7 @@ inject frames of its own.
 This is a deliberate scoping decision, not an oversight, so it is the
 operator's responsibility to keep the transport secure:
 
-- Bind cannelloni to a trusted interface and keep the transport port off any
+- Bind cannellonis to a trusted interface and keep the transport port off any
   untrusted network — firewall it, put it on a VPN/overlay, or use a physically
   isolated segment.
 - Treat the multi-peer hub, dynamic discovery (`--discover`) and mDNS discovery
@@ -44,7 +50,7 @@ operator's responsibility to keep the transport secure:
   **misconfiguration hygiene** (catching the wrong host dialing in), **not** a
   defence against a hostile one.
 
-If you must cross an untrusted network, run cannelloni **inside** a transport
+If you must cross an untrusted network, run cannellonis **inside** a transport
 that does provide authentication and confidentiality (e.g. WireGuard, IPsec or
 an SSH tunnel).
 
@@ -58,8 +64,8 @@ an SSH tunnel).
 
 ## Compilation
 
-cannelloni uses cmake to generate a Makefile.
-You can build cannelloni using the following command.
+cannellonis uses cmake to generate a Makefile.
+You can build cannellonis using the following command.
 
 ```
 cmake -B build -DCMAKE_BUILD_TYPE=Release
@@ -95,12 +101,12 @@ Two machines 1 and 2 need to be connected:
 Machine 2 needs to be connected to the physical CAN Bus that is attached
 to Machine 1.
 
-Start cannelloni on Machine 1:
+Start cannellonis on Machine 1:
 
 ```
-cannelloni -I slcan0 -R 192.168.0.3 -r 20000 -l 20000
+cannellonis -I slcan0 -R 192.168.0.3 -r 20000 -l 20000
 ```
-cannelloni will now listen on port 20000 and has Machine 2 configured as
+cannellonis will now listen on port 20000 and has Machine 2 configured as
 its remote.
 
 Prepare vcan on Machine 2:
@@ -127,9 +133,9 @@ This command will rate limit `vcan0` to 300 kbit/s.
 Try to match the rate limit with your physical interface on the remote.
 Keep also in mind that this also increases the overall latency!
 
-Now start cannelloni on Machine 2:
+Now start cannellonis on Machine 2:
 ```
-cannelloni -I vcan0 -R 192.168.0.2 -r 20000 -l 20000
+cannellonis -I vcan0 -R 192.168.0.2 -r 20000 -l 20000
 ```
 
 The tunnel is now complete and can be used on both machines.
@@ -143,7 +149,7 @@ what is wrong.
 *UDP + SCTP only!*
 
 
-cannelloni either sends a full UDP frame or all CAN frames that
+cannellonis either sends a full UDP frame or all CAN frames that
 are queued when the timeout that has been specified by the `-t` option
 has been reached.
 The default value is 100000 us, so the worst case latency for any can
@@ -171,13 +177,13 @@ a shorter timeout you can create a file with the following content.
 15,50000
 ```
 
-You can load this file into each cannelloni instance with the `-T
+You can load this file into each cannellonis instance with the `-T
 file.csv` option.
 Please note that the whole buffer will be flushed and not only the two
 frames.
 
 If you enable timer debugging using `-d t` you should see that the table
-has been loaded successfully into cannelloni:
+has been loaded successfully into cannellonis:
 
 ```
 [...]
@@ -195,19 +201,19 @@ INFO:cannelloni.cpp[155]:main:Other Frames:100000 us.
 
 ## UDP
 
-cannelloni supports UDP for stable connections where no packet loss
+cannellonis supports UDP for stable connections where no packet loss
 is expected. Here two instances communicate using defined ports.
 
 Usage example
 
 IP: 192.168.0.2
 ```
-cannelloni -I vcan0 -R 192.168.0.3 -r 12000 -l 13000
+cannellonis -I vcan0 -R 192.168.0.3 -r 12000 -l 13000
 ```
 
 IP: 192.168.0.3
 ```
-cannelloni -I vcan0 -R 192.168.0.2 -r 13000 -l 12000
+cannellonis -I vcan0 -R 192.168.0.2 -r 13000 -l 12000
 ```
 
 Set the *MTU* using `-m` depending on your connection. Default is
@@ -216,7 +222,7 @@ Set the *MTU* using `-m` depending on your connection. Default is
 ### UDP multi-peer hub
 
 A single UDP instance can bridge a CAN bus to **several** UDP peers at once,
-turning cannelloni into a hub: the local CAN bus and every peer form one
+turning cannellonis into a hub: the local CAN bus and every peer form one
 virtual shared CAN bus where each participant sees every other participant's
 frames — like real devices on the same wire. A frame ingested from one
 participant is delivered to every participant *except* its origin
@@ -228,7 +234,7 @@ defaults to `-r`), or put one `HOST[:PORT]` per line in a file passed to
 
 ```
 # hub: bridge vcan0 to three peers
-cannelloni -I vcan0 -l 20000 --peer 192.168.0.3 --peer 192.168.0.4 --peer 192.168.0.5
+cannellonis -I vcan0 -l 20000 --peer 192.168.0.3 --peer 192.168.0.4 --peer 192.168.0.5
 ```
 
 Each peer points back at the hub as an ordinary single-peer instance
@@ -244,10 +250,10 @@ Enable it with `--discover`:
 
 ```
 # discovery hub: no static peers, learn everyone who shows up
-cannelloni -I vcan0 -l 20000 --discover
+cannellonis -I vcan0 -l 20000 --discover
 ```
 
-With `--discover` a datagram from an unknown source that is a valid cannelloni
+With `--discover` a datagram from an unknown source that is a valid cannellonis
 packet adds that source as a new peer; from then on it is a full participant on
 the virtual bus. Two knobs bound it:
 
@@ -266,13 +272,13 @@ cap is misconfiguration hygiene, not a security control.
 
 #### mDNS / zeroconf discovery
 
-If cannelloni was built with Avahi support (`AVAHI_SUPPORT`, on by default when
+If cannellonis was built with Avahi support (`AVAHI_SUPPORT`, on by default when
 `libavahi-client` is present), the hub can discover peers over **mDNS/zeroconf**
 rather than being told about them. Enable it with `--mdns`:
 
 ```
 # mDNS hub: advertise + browse the LAN, no peer config at all
-cannelloni -I vcan0 -l 20000 --mdns
+cannellonis -I vcan0 -l 20000 --mdns
 ```
 
 Each instance advertises a `_cannelloni._udp` service on its transport port and
@@ -318,7 +324,7 @@ Notes and limits:
 
 ## SCTP
 
-With SCTP it is possible to use cannelloni over lossy connections
+With SCTP it is possible to use cannellonis over lossy connections
 where packet loss and re-ordering is very likely.
 The SCTP implementation uses the server-client model (for now).
 One instance binds on a fixed port and the other instance (client)
@@ -328,12 +334,12 @@ Usage example:
 
 IP: 192.168.0.2 (Server)
 ```
-cannelloni -I vcan0 -S s
+cannellonis -I vcan0 -S s
 ```
 
 IP: 192.168.0.3 (Client)
 ```
-cannelloni -I vcan0 -S c -R 192.168.0.2
+cannellonis -I vcan0 -S c -R 192.168.0.2
 ```
 
 If there is no remote IP supplied to the server instance, every client
@@ -346,12 +352,12 @@ Usage example:
 
 IP: 192.168.0.2 (Server)
 ```
-cannelloni -I vcan0 -C s
+cannellonis -I vcan0 -C s
 ```
 
 IP: 192.168.0.3 (Client)
 ```
-cannelloni -I vcan0 -C c -R 192.168.0.2
+cannellonis -I vcan0 -C c -R 192.168.0.2
 ```
 
 With TCP, no frame buffer is used an frames are immediately transmitted,
@@ -368,10 +374,10 @@ setups are unchanged.
 
 ```
 # hub: one server, any number of TCP clients dial in
-cannelloni -I vcan0 -C s -l 20000 -p
+cannellonis -I vcan0 -C s -l 20000 -p
 
 # each leaf is an ordinary TCP client pointing at the hub
-cannelloni -I vcan0 -C c -R <hub> -r 20000
+cannellonis -I vcan0 -C c -R <hub> -r 20000
 ```
 
 The clients are learnt on connect and dropped on disconnect; a new client can
@@ -399,7 +405,7 @@ the buffer timeout and frame sorting do not apply.
 
 ## Latency and jitter
 
-A cannelloni link is **not** a CAN wire and does not behave like one with
+A cannellonis link is **not** a CAN wire and does not behave like one with
 respect to timing. On UDP and SCTP frames are buffered and flushed either when
 the buffer timeout (`-t`, default 100000 us = 100 ms) is reached or when a
 datagram fills, so a frame can wait up to the timeout before it leaves. The
@@ -462,10 +468,10 @@ written to a slow participant. A hub has a second, distinct loss point at
 *ingress*: each CAN frame read from the local bus is fanned out to every peer
 (allocate + copy + enqueue) inline before the next `recv()`, so at high bus
 load times many peers the kernel's CAN socket receive buffer can fill and the
-kernel drops frames *before* cannelloni ever sees them. This is invisible to
+kernel drops frames *before* cannellonis ever sees them. This is invisible to
 the egress drop-oldest and to the receivers.
 
-cannelloni mitigates this by requesting a large CAN socket receive buffer
+cannellonis mitigates this by requesting a large CAN socket receive buffer
 (clamped by `net.core.rmem_max` — raise that sysctl if you run a busy
 many-peer hub) and reports any overrun rather than dropping silently: each
 event is logged as a `CAN ingress overrun` warning and the running total
@@ -481,9 +487,9 @@ This can be achieved by supplying the `-s` option.
 
 # Filtering
 
-cannelloni does not support filtering, if however you want to only bridge a
+cannellonis does not support filtering, if however you want to only bridge a
 certain set of CAN IDs, you can first forward the frames of interest to virtual CAN
-interface. From there you will send using cannelloni.
+interface. From there you will send using cannellonis.
 
 This can be achieved with `cangw` which is part of [can-utils](https://github.com/linux-can/can-utils/) and its respective
 kernel module is also present in upstream Linux.
@@ -491,7 +497,7 @@ kernel module is also present in upstream Linux.
 Let's look at an example where currently `can0` is sent to a remote machine:
 
 ```
-cannelloni -I can0 -R 192.168.0.3 -r 12000
+cannellonis -I can0 -R 192.168.0.3 -r 12000
 ```
 
 Let's say you want to only receive CAN frames with the ID `0x042` at the remote machine.
@@ -517,10 +523,10 @@ cangw -A -s can0 -d vcan0 -f 042:C00007FF -e
 ```
 
 If you start candump now on `vcan0`, you should only see frames with ID `0x042`.
-Now change the cannelloni command to
+Now change the cannellonis command to
 
 ```
-cannelloni -I vcan0 -R 192.168.0.3 -r 12000
+cannellonis -I vcan0 -R 192.168.0.3 -r 12000
 ```
 
 Now you should see those `0x042` frames also at the remote machine.
@@ -547,5 +553,5 @@ for your work.
 
 Copyright 2014-2023 Maximilian Güntner <code@mguentner.de>
 
-cannelloni is licensed under the GPL, version 2. See gpl-2.0.txt for
+cannellonis is licensed under the GPL, version 2. See gpl-2.0.txt for
 more information.

@@ -27,7 +27,7 @@ testers.nixosTest {
           ];
           networking.firewall.enable = false;
           services.setup_can.mtu = 72; # CANFD_MTU -> CAN-FD negotiated
-          services.cannelloni = {
+          services.cannellonis = {
             enable = true;
             transport = "tcp";
             mode = "client";
@@ -49,7 +49,7 @@ testers.nixosTest {
           ];
           networking.firewall.enable = false;
           services.setup_can.mtu = 72; # CANFD_MTU -> CAN-FD negotiated
-          services.cannelloni = {
+          services.cannellonis = {
             enable = true;
             transport = "tcp";
             mode = "server";
@@ -105,11 +105,11 @@ testers.nixosTest {
 
     start_all()
     for n in nodes.values():
-        n.wait_for_unit("cannelloni")
+        n.wait_for_unit("cannellonis")
     # The hub logs one negotiated line per accepted client; wait for all three.
-    node_hub.wait_until_succeeds("journalctl -u cannelloni | grep 'TCPServerThread up and running'")
+    node_hub.wait_until_succeeds("journalctl -u cannellonis | grep 'TCPServerThread up and running'")
     node_hub.wait_until_succeeds(
-        "test $(journalctl -u cannelloni | grep -c 'negotiated as participant') -ge 3"
+        "test $(journalctl -u cannellonis | grep -c 'negotiated as participant') -ge 3"
     )
 
     # --- Every participant reaches every other, never itself --------------
@@ -123,10 +123,10 @@ testers.nixosTest {
            needle="DEADBEEFCAFEBABE0011223344")
 
     # --- Backpressure isolation: stall node_c, others keep flowing --------
-    # Freeze node_c's cannelloni so it stops reading its TCP socket; the hub's
+    # Freeze node_c's cannellonis so it stops reading its TCP socket; the hub's
     # send queue to it fills. With blocking writes this would stall the whole
     # hub; with non-blocking per-peer TX (Phase 4b) the others are unaffected.
-    node_c.succeed("pkill -STOP -x cannelloni")
+    node_c.succeed("pkill -STOP -x cannellonis")
     node_a.succeed("cangen vcan0 -g 0 -I i -D r -L 8 -n 5000")
     node_a.sleep(5)  # let the healthy node_a -> hub -> node_b path drain
     # A fresh sentinel from node_a must still reach node_b while node_c is stuck.
@@ -134,11 +134,11 @@ testers.nixosTest {
     node_a.succeed("cansend vcan0 7AA#CAFEBABE")
     node_b.wait_until_succeeds("grep -q '7AA#CAFEBABE' /tmp/cap.log")
     node_b.execute("pkill -x candump")
-    node_hub.succeed("systemctl is-active cannelloni")
+    node_hub.succeed("systemctl is-active cannellonis")
     print("[isolation] node_b kept flowing while node_c was stalled")
 
     # Recovery: unfreeze node_c, it must receive new frames again.
-    node_c.succeed("pkill -CONT -x cannelloni")
+    node_c.succeed("pkill -CONT -x cannellonis")
     node_c.sleep(2)
     cap_start(node_c)
     node_a.succeed("cansend vcan0 7BB#0BADF00D")
@@ -147,11 +147,11 @@ testers.nixosTest {
     print("[isolation] node_c recovered after SIGCONT")
 
     # --- Dead peer: stop one leaf, the hub keeps serving the rest ---------
-    node_c.succeed("systemctl stop cannelloni")
+    node_c.succeed("systemctl stop cannellonis")
     cap_start(node_b)
     node_a.succeed("cansend vcan0 555#DDDDDDDD")
     node_b.wait_until_succeeds("grep -q '555#DDDDDDDD' /tmp/cap.log")
-    node_hub.succeed("systemctl is-active cannelloni")
+    node_hub.succeed("systemctl is-active cannellonis")
     node_b.execute("pkill -x candump")
   '';
 }

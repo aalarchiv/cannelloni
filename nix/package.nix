@@ -7,7 +7,7 @@
   avahi,
 }:
 stdenv.mkDerivation {
-  name = "cannelloni";
+  name = "cannellonis";
   version = "2.0.1";
 
   src = builtins.filterSource (

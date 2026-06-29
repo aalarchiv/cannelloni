@@ -4,7 +4,7 @@
 # A hub fans every CAN frame read from its local bus out to every peer inline
 # (allocate + copy + enqueue) before the next recv(), so the CAN RX critical
 # path grows with the peer count. Under a high-rate burst the kernel CAN socket
-# receive buffer can overflow and drop frames *at ingress* -- before cannelloni
+# receive buffer can overflow and drop frames *at ingress* -- before cannellonis
 # sees them -- which is distinct from (and invisible to) the bounded drop-oldest
 # at egress. The hub now (a) requests a large SO_RCVBUF so the kernel queue
 # absorbs the inline fan-out and (b) enables SO_RXQ_OVFL so any overrun is
@@ -36,7 +36,7 @@ testers.nixosTest {
           ];
           networking.firewall.enable = false;
           services.setup_can.mtu = 72;
-          services.cannelloni = {
+          services.cannellonis = {
             enable = true;
             transport = "udp";
             ipProtocol = "ipv4";
@@ -61,7 +61,7 @@ testers.nixosTest {
           # request is honoured and the kernel queue can hold the whole burst,
           # leaving overflow attributable to a real ingress-path stall.
           boot.kernel.sysctl."net.core.rmem_max" = 33554432; # 32 MiB
-          services.cannelloni = {
+          services.cannellonis = {
             enable = true;
             transport = "udp";
             ipProtocol = "ipv4";
@@ -88,14 +88,14 @@ testers.nixosTest {
     leaves = {"node_a": node_a, "node_b": node_b, "node_c": node_c}
 
     start_all()
-    node_hub.wait_for_unit("cannelloni")
+    node_hub.wait_for_unit("cannellonis")
     for n in leaves.values():
-        n.wait_for_unit("cannelloni")
-    node_hub.wait_until_succeeds("journalctl -u cannelloni | grep 'UDPThread up and running'")
-    node_hub.wait_until_succeeds("journalctl -u cannelloni | grep 'CANThread up and running'")
+        n.wait_for_unit("cannellonis")
+    node_hub.wait_until_succeeds("journalctl -u cannellonis | grep 'UDPThread up and running'")
+    node_hub.wait_until_succeeds("journalctl -u cannellonis | grep 'CANThread up and running'")
     # The mitigation must actually be in effect: enabling SO_RXQ_OVFL must not
     # have failed (otherwise a 0-drop result would be meaningless).
-    node_hub.fail("journalctl -u cannelloni | grep -q 'Could not enable SO_RXQ_OVFL'")
+    node_hub.fail("journalctl -u cannellonis | grep -q 'Could not enable SO_RXQ_OVFL'")
 
     # --- Flood the hub's own CAN bus; the hub fans every frame out ~9 ways ----
     # -g0 sends as fast as possible; -n bounds the burst below the (raised)
@@ -103,9 +103,9 @@ testers.nixosTest {
     node_hub.succeed("cangen vcan0 -g 0 -I i -D r -L 8 -n 5000")
 
     # Everyone survives the flood.
-    node_hub.succeed("systemctl is-active cannelloni")
+    node_hub.succeed("systemctl is-active cannellonis")
     for n in leaves.values():
-        n.succeed("systemctl is-active cannelloni")
+        n.succeed("systemctl is-active cannellonis")
 
     # Recovery: once the backlog drains a fresh frame still reaches a leaf.
     node_a.execute("pkill -x candump 2>/dev/null; true")
@@ -119,10 +119,10 @@ testers.nixosTest {
     # --- No silent ingress loss --------------------------------------------
     # Stop the hub so it prints its CAN shutdown summary, then assert it read a
     # large number of frames AND dropped none at ingress.
-    node_hub.succeed("systemctl stop cannelloni")
-    node_hub.wait_until_succeeds("journalctl -u cannelloni | grep 'CAN Transmission Summary'")
+    node_hub.succeed("systemctl stop cannellonis")
+    node_hub.wait_until_succeeds("journalctl -u cannellonis | grep 'CAN Transmission Summary'")
     summary = node_hub.succeed(
-        "journalctl -u cannelloni | grep 'CAN Transmission Summary' | tail -1")
+        "journalctl -u cannellonis | grep 'CAN Transmission Summary' | tail -1")
     print("[ingress] hub summary: %s" % summary.strip())
 
     import re
@@ -134,7 +134,7 @@ testers.nixosTest {
     # The mitigation must have kept the kernel from dropping at ingress.
     assert drops == 0, "hub saw %d ingress drops (RX=%d): receive buffer overflowed" % (drops, rx)
     # And no overrun warning should have been logged during the run.
-    node_hub.fail("journalctl -u cannelloni | grep -q 'CAN ingress overrun'")
+    node_hub.fail("journalctl -u cannellonis | grep -q 'CAN ingress overrun'")
     print("[ingress] OK: RX=%d ingress drops=%d" % (rx, drops))
   '';
 }

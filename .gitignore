@@ -4,7 +4,7 @@ Makefile
 *.a
 cmake_install.cmake
 config.h
-cannelloni
+cannellonis
 tags
 compile_commands.json
 .cache/

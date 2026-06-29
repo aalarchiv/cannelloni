@@ -78,9 +78,9 @@ class MdnsDiscovery::Impl {
        * our own advertisement; Avahi de-collides clashes by suffixing. */
       char host[256];
       if (gethostname(host, sizeof(host)) != 0)
-        std::strcpy(host, "cannelloni");
+        std::strcpy(host, "cannellonis");
       host[sizeof(host) - 1] = '\0';
-      m_serviceName = std::string("cannelloni ") + host + " " + m_canInterface;
+      m_serviceName = std::string("cannellonis ") + host + " " + m_canInterface;
       if (m_serviceName.size() > 63) /* DNS-SD label limit */
         m_serviceName.resize(63);
     }

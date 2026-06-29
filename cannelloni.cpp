@@ -72,8 +72,8 @@
 using namespace cannelloni;
 
 void printUsage() {
-  std::cout << "cannelloni Release: " << CANNELLONI_VERSION << std::endl;
-  std::cout << "Usage: cannelloni OPTIONS" << std::endl;
+  std::cout << "cannellonis Release: " << CANNELLONI_VERSION << std::endl;
+  std::cout << "Usage: cannellonis OPTIONS" << std::endl;
   std::cout << "Available options:" << std::endl;
 #ifdef SCTP_SUPPORT
   std::cout << "\t -S [cs] \t\t enable SCTP transport." << std::endl;
@@ -115,7 +115,7 @@ void printUsage() {
   std::cout << "\t -6 \t\t\t use IPv6" << std::endl;
   std::cout << "\t -m \t\t\t set MTU, default: 1500 bytes" << std::endl;
   std::cout << "\t -f \t\t\t fork into background / daemon mode" << std::endl;
-  std::cout << "\t -P \t\t\t pid file path (only in daemon mode), default: /var/run/cannelloni.pid" << std::endl;
+  std::cout << "\t -P \t\t\t pid file path (only in daemon mode), default: /var/run/cannellonis.pid" << std::endl;
   std::cout << "\t -h \t\t\t display this help text" << std::endl;
 }
 
@@ -261,7 +261,7 @@ int main(int argc, char **argv) {
   std::string canInterfaceName = "vcan0";
   uint32_t bufferTimeout = 100000;
   std::string timeoutTableFile;
-  std::string pidFilePath = "/var/run/cannelloni.pid";
+  std::string pidFilePath = "/var/run/cannellonis.pid";
   /* Key is CAN ID, Value is timeout in us */
   std::map<uint32_t, uint32_t> timeoutTable;
   /* Static UDP hub peer list (--peer host:port, repeatable; --peers-file) */
@@ -617,7 +617,7 @@ int main(int argc, char **argv) {
   }
   
   if (forkIntoBackground) {
-    std::cout << "cannelloni is forking into background." << std::endl;
+    std::cout << "cannellonis is forking into background." << std::endl;
     daemonize(pidFilePath);
   }
 
