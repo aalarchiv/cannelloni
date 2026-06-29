@@ -5,7 +5,7 @@
   };
 
   # MTU of the vcan0 interface. The default of 16 is the classic CAN MTU;
-  # set to 72 (CANFD_MTU) so cannelloni negotiates CAN-FD and FD frames can
+  # set to 72 (CANFD_MTU) so cannellonis negotiates CAN-FD and FD frames can
   # be exercised (see the characterization test).
   options.services.setup_can.mtu = with lib; mkOption {
     type = types.int;
@@ -19,7 +19,7 @@
 
     systemd.services.setup_can = {
       wantedBy = [ "multi-user.target" ];
-      before = [ "cannelloni.service" ];
+      before = [ "cannellonis.service" ];
       script = ''
         ${pkgs.kmod}/bin/modprobe vcan
         ${pkgs.iproute2}/bin/ip link add name vcan0 type vcan
@@ -32,7 +32,7 @@
     };
     systemd.services.dump_can = lib.mkIf config.services.dump_can.enable {
       wantedBy = [ "multi-user.target" ];
-      before = [ "cannelloni.service" ];
+      before = [ "cannellonis.service" ];
       after = [ "setup_can.service" ];
       wants = [ "setup_can.service" ];
       script = ''

@@ -10,7 +10,7 @@
 #   node_b --/
 #
 # Acceptance:
-#   1. an unknown source carrying valid cannelloni traffic is discovered and
+#   1. an unknown source carrying valid cannellonis traffic is discovered and
 #      joins the virtual bus (fan-out + peer<->peer reflection still hold);
 #   2. a discovered peer that goes silent past peerTimeout is evicted;
 #   3. a peer that dials back in after eviction is re-learnt as a fresh
@@ -29,7 +29,7 @@ testers.nixosTest {
           ];
           networking.firewall.enable = false;
           services.setup_can.mtu = 72; # CANFD_MTU -> CAN-FD negotiated
-          services.cannelloni = {
+          services.cannellonis = {
             enable = true;
             transport = "udp";
             ipProtocol = "ipv4";
@@ -50,7 +50,7 @@ testers.nixosTest {
           ];
           networking.firewall.enable = false;
           services.setup_can.mtu = 72; # CANFD_MTU -> CAN-FD negotiated
-          services.cannelloni = {
+          services.cannellonis = {
             enable = true;
             transport = "udp";
             ipProtocol = "ipv4";
@@ -111,7 +111,7 @@ testers.nixosTest {
         print("[fanout] %s -> %s OK" % (src_name, expect))
 
     def hub_log_count(needle):
-        rc, out = node_hub.execute("journalctl -u cannelloni | grep -c '%s'" % needle)
+        rc, out = node_hub.execute("journalctl -u cannellonis | grep -c '%s'" % needle)
         try:
             return int(out.strip())
         except ValueError:
@@ -119,7 +119,7 @@ testers.nixosTest {
 
     start_all()
     for n in nodes.values():
-        n.wait_for_unit("cannelloni")
+        n.wait_for_unit("cannellonis")
     for n in nodes.values():
         n.wait_until_succeeds("journalctl | grep 'UDPThread up and running'")
         n.wait_until_succeeds("journalctl | grep 'CANThread up and running'")
@@ -127,7 +127,7 @@ testers.nixosTest {
     # --- 1. Discovery: an unknown source is learnt from valid RX ----------
     # node_a dials in; the hub learns it and its frame reaches the hub's bus.
     fanout("node_a", "1A1#AA01", ["node_hub"])
-    node_hub.wait_until_succeeds("journalctl -u cannelloni | grep 'Discovered UDP peer'")
+    node_hub.wait_until_succeeds("journalctl -u cannellonis | grep 'Discovered UDP peer'")
 
     # --- 2. The hub routes its own CAN frames to a learnt peer ------------
     # Refresh node_a right before (liveness is only bumped when a peer sends),
@@ -145,7 +145,7 @@ testers.nixosTest {
     disc_before = hub_log_count("Discovered UDP peer")
     node_b.succeed("cansend vcan0 2B2#BB02")
     node_hub.wait_until_succeeds(
-        "test $(journalctl -u cannelloni | grep -c 'Discovered UDP peer') -gt %d" % disc_before)
+        "test $(journalctl -u cannellonis | grep -c 'Discovered UDP peer') -gt %d" % disc_before)
     # Both peers send in a tight window, so each is fresh when the other's frame
     # is reflected back through the hub (node_a's send also re-refreshes it).
     cap_start(node_a)
@@ -165,7 +165,7 @@ testers.nixosTest {
     node_hub.sleep(36)
     assert hub_log_count("Evicting silent UDP peer") > evicted_before, \
         "hub did not evict the silent discovered peers"
-    node_hub.succeed("systemctl is-active cannelloni")
+    node_hub.succeed("systemctl is-active cannellonis")
     print("[eviction] OK")
 
     # --- 5. Re-learn after eviction ---------------------------------------
@@ -173,7 +173,7 @@ testers.nixosTest {
     fanout("node_a", "3C3#CC03", ["node_hub"])
     assert hub_log_count("Discovered UDP peer") > discovered_before, \
         "hub did not re-learn node_a after eviction"
-    node_hub.succeed("systemctl is-active cannelloni")
+    node_hub.succeed("systemctl is-active cannellonis")
     print("[re-learn] OK")
   '';
 }

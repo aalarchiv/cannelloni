@@ -11,7 +11,7 @@ testers.nixosTest {
           ./common.nix
         ];
         networking.firewall.enable = false;
-        services.cannelloni = {
+        services.cannellonis = {
           enable = true;
           transport = "tcp";
           ipProtocol = "ipv4";
@@ -28,7 +28,7 @@ testers.nixosTest {
           ./common.nix
         ];
         networking.firewall.enable = false;
-        services.cannelloni = {
+        services.cannellonis = {
           enable = true;
           transport = "tcp";
           ipProtocol = "ipv4";
@@ -44,8 +44,8 @@ testers.nixosTest {
 
   testScript = ''
     start_all()
-    node_a.wait_for_unit("cannelloni")
-    node_b.wait_for_unit("cannelloni")
+    node_a.wait_for_unit("cannellonis")
+    node_b.wait_for_unit("cannellonis")
     node_a.wait_until_succeeds("journalctl | grep 'Got a connection from 192'")
     node_b.wait_until_succeeds("journalctl | grep 'attempt_connect:Connected'")
 
